@@ -151,10 +151,6 @@ export function createGraphSurface(
         container.style.minHeight = "450px";
         host = context.dom.createElement("div");
         host.className = "rad-flow-host";
-        host.setAttribute(
-          "style",
-          "position:absolute; inset:0; width:100%; height:100%;"
-        );
         container.appendChild(host);
         const isActive = () => active.get(id)?.host === host;
         const callbacks: NonNullable<RadiusGraphProps["callbacks"]> = {

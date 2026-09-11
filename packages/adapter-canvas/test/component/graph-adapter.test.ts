@@ -5,6 +5,7 @@ import { mountRadiusGraph } from "@radius-project/graph-react";
 import "@radius-project/graph-react/styles.css";
 import { installGraphEntry } from "../../src/browser/entries/graph.js";
 import { asGraphController } from "../../src/browser/graph/surface.js";
+import { SHELL_STYLE_CSS } from "../../src/pages/shell-styles.js";
 import { createRealScope, jsonResponse } from "./support/real-scope.js";
 
 const dispose: Array<() => void> = [];
@@ -13,6 +14,69 @@ afterEach(() => {
 });
 
 describe("Canvas entry with the canonical renderer in Chromium", () => {
+  it.each([360, 900])(
+    "preserves legend spacing and a 450px drawing area in a %ipx host",
+    async (width) => {
+      const real = createRealScope();
+      const style = document.createElement("style");
+      style.textContent = SHELL_STYLE_CSS;
+      document.head.appendChild(style);
+      const card = document.createElement("div");
+      card.className = "rad-card";
+      card.style.width = `${width}px`;
+      const note = document.createElement("div");
+      note.textContent = "Last deployment.";
+      note.style.cssText = "font-size:12px;margin-bottom:12px;";
+      real.host.id = "graph-container";
+      card.append(note, real.host);
+      document.body.appendChild(card);
+      const teardown = installGraphEntry(real.scope, mountRadiusGraph);
+      dispose.push(() => {
+        teardown();
+        real.dispose();
+        card.remove();
+        style.remove();
+      });
+      const render: unknown = Reflect.get(real.scope, "radiusRenderGraph");
+      if (typeof render !== "function")
+        throw new Error("Canvas did not publish radiusRenderGraph");
+      render(
+        real.host.id,
+        [{ id: "web", name: "web", type: "Radius.Compute/containers" }],
+        { deployMode: true, showLegend: true }
+      );
+      const legend = await within(real.host).findByText("Pending / deploying");
+      const legendBox = legend.getBoundingClientRect();
+      expect(legendBox.top - note.getBoundingClientRect().bottom).toBe(12);
+      expect(getComputedStyle(legend).fontSize).toBe("12px");
+      expect(legendBox.height).toBe(20);
+      expect(
+        legend.querySelector("img")?.getBoundingClientRect()
+      ).toMatchObject({
+        width: 14,
+        height: 14,
+        top: legendBox.top + 3
+      });
+      const viewport = real.host.querySelector(".radius-graph__viewport");
+      if (!(viewport instanceof HTMLElement))
+        throw new Error("Canvas did not render the shared drawing area");
+      expect(viewport.getBoundingClientRect().top - legendBox.bottom).toBe(8);
+      expect(viewport.getBoundingClientRect().height).toBe(450);
+      expect(getComputedStyle(viewport).borderRadius).toBe("10px");
+      expect(getComputedStyle(real.host).backgroundColor).toBe(
+        "rgba(0, 0, 0, 0)"
+      );
+      const control = await within(real.host).findByRole("button", {
+        name: "zoom in"
+      });
+      expect(getComputedStyle(control).boxSizing).toBe("content-box");
+      expect(control.getBoundingClientRect()).toMatchObject({
+        width: 36,
+        height: 37
+      });
+    }
+  );
+
   it("mounts through native host ports, opens local source over HTTP, updates and tears down", async () => {
     const real = createRealScope({
       route: () => jsonResponse(200, { opened: true })

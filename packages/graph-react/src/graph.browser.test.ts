@@ -53,6 +53,7 @@ function mount(
   options: {
     localSource?: boolean;
     deployMode?: boolean;
+    showLegend?: boolean;
     diffMode?: boolean;
     baseBranch?: string;
     workspaceBranch?: string;
@@ -62,6 +63,7 @@ function mount(
   const settings = resolveGraphSettings({
     localSource: options.localSource ?? true,
     deployMode: options.deployMode,
+    showLegend: options.showLegend,
     diffMode: options.diffMode,
     baseBranch: options.baseBranch,
     workspaceBranch: options.workspaceBranch,
@@ -857,6 +859,42 @@ describe("graph view in a real browser", () => {
     ).toBeTruthy();
   });
 
+  it("preserves control hit areas without resizing host buttons or the fill-container viewport", async () => {
+    const { host } = mount({ deployMode: true, showLegend: true });
+    await card("web");
+    const externalButton = document.createElement("button");
+    externalButton.textContent = "Host action";
+    externalButton.style.cssText =
+      "box-sizing:border-box;width:26px;height:26px;padding:5px;border:0;";
+    document.body.appendChild(externalButton);
+    disposers.push(() => externalButton.remove());
+
+    const controls = host.querySelectorAll(".react-flow__controls-button");
+    expect(controls).toHaveLength(3);
+    for (const control of controls) {
+      expect(getComputedStyle(control).boxSizing).toBe("content-box");
+      expect(control.getBoundingClientRect()).toMatchObject({
+        width: 36,
+        height: 37
+      });
+      const glyph = control.querySelector("svg");
+      if (!glyph) throw new Error("Graph control has no glyph");
+      expect(glyph.getBoundingClientRect().width).toBe(12);
+      expect(glyph.getBoundingClientRect().height).toBeCloseTo(
+        (12 * glyph.viewBox.baseVal.height) / glyph.viewBox.baseVal.width
+      );
+    }
+    expect(externalButton.getBoundingClientRect()).toMatchObject({
+      width: 26,
+      height: 26
+    });
+    const viewport = host.querySelector(".radius-graph__viewport");
+    expect(viewport?.getBoundingClientRect().bottom).toBe(
+      host.getBoundingClientRect().bottom
+    );
+    expect(viewport?.getBoundingClientRect().height).toBeLessThan(600);
+  });
+
   it("preserves a zoomed viewport when deployment data refreshes", async () => {
     const { graph, host } = mount({ deployMode: true });
     await card("web");
@@ -880,6 +918,7 @@ describe("graph view in a real browser", () => {
       localSource: true,
       deployMode: true
     });
+
     const next = buildGraph(
       settings,
       RESOURCES.map((resource) => ({

@@ -269,6 +269,8 @@
   overflow: hidden;
 }
 .radius-graph .react-flow__controls-button {
+  /* Preserve Flow's content-box sizing despite the scoped reset above. */
+  box-sizing: content-box;
   background: var(--rad-surface);
   border-bottom: 1px solid var(--rad-stroke);
   color: var(--rad-text);

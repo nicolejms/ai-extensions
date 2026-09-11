@@ -425,6 +425,12 @@ export const SHELL_STYLE_CSS = `  /* ─── Radius design tokens (from Figma 
   /* ─── Graph + node cards ──────────────────────────────────────────────── */
   #graph-container { width: 100%; height: 450px; border-radius: var(--rad-radius-lg); position: relative; background: var(--rad-bg-subtle); }
   #graph-container:empty { background: transparent; }
+  /* Canvas keeps the legend in document flow above a fixed-height drawing area.
+     Standalone graph consumers retain the shared fill-container layout. */
+  #graph-container:has(> .rad-flow-host) { height: auto; background: transparent; }
+  .rad-flow-host { position: relative; width: 100%; }
+  .rad-flow-host > .radius-graph { display: block; height: auto; background: transparent; }
+  .rad-flow-host .radius-graph__viewport { height: 450px; border-radius: var(--rad-radius-lg); background: var(--rad-bg-subtle); }
   :root {
     --radius-graph-background: var(--rad-bg);
     --radius-graph-text: var(--rad-text);
@@ -461,7 +467,6 @@ export const SHELL_STYLE_CSS = `  /* ─── Radius design tokens (from Figma 
   .rad-feedback__link + .rad-feedback__link { border-top: 1px solid var(--rad-stroke); }
   .rad-feedback__link:hover { background: var(--rad-bg-subtle); text-decoration: underline; }
 
-  .rad-flow-host { width: 100%; height: 100%; }
   /* Delete confirmation dialog (Figma type-to-confirm flow). Global because
      every surface that can delete a deployment shares this one dialog. */
   .rad-ddlg { max-width:480px; width:90%; margin:0; padding:0; background:var(--rad-surface); color:var(--rad-text); border:1px solid var(--rad-stroke); border-radius:12px; box-shadow:0 8px 24px var(--rad-shadow); overflow:hidden; }
