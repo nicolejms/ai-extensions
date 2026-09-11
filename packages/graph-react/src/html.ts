@@ -10,7 +10,3 @@ export function escapeBrowserHtml(value: unknown): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
-
-export function hasClassToken(className: string, token: string): boolean {
-  return className.split(/\s+/).includes(token);
-}

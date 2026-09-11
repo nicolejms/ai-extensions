@@ -44,7 +44,7 @@ The host owns loading, retrieval failures, connection selection, permissions, an
 ## Input semantics
 
 | Input kind            | Contract                                                                                                                                                                                             |
-|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `live`                | Normalized UCP resources identified by full IDs; raw optional provisioning status; no diff hashes, inferred deployment success, modeled source links, Canvas visibility filter, or output expansion. |
 | `modeled`             | Canvas modeled resources; hide visualization-only image/registry-secret nodes and expand concrete outputs.                                                                                           |
 | `planned`             | Preserve modeled resource identity/topology, show representative resolved types, and use planned styling.                                                                                            |
@@ -63,7 +63,11 @@ Identical duplicate resource records are coalesced with a diagnostic. Conflictin
 
 `options` supports legends, popup enablement, edge style, repository URL, source branches, and locality. `theme` supports background, text, muted text, accent, font family, and color scheme. All custom styles are scoped under `.radius-graph`; the bundled React Flow vendor stylesheet uses its upstream `.react-flow` namespace. Additional semantic CSS inputs are `--radius-graph-danger`, `--radius-graph-added`, `--radius-graph-modified`, and `--radius-graph-removed`.
 
+The component fills its container. `.radius-graph` and its drawing area `.radius-graph__viewport` are a supported styling contract, so a host that owns the surrounding layout can size the drawing area itself; every other class under `.radius-graph` is internal and may change. The package deliberately ships no height of its own.
+
 Each component has independent layout, viewport, overlay, and timer state. Status-only updates preserve the viewport; changed node membership refits it. Details controls work by keyboard, Escape closes the overlay and restores focus, and teardown releases roots/listeners/timers. Missing finite layout positions produce a visible degraded-layout message and readable stacked cards.
+
+Inline `options` and `callbacks` objects are safe. A host render that reallocates them keeps an open details overlay, its restorable focus, and any dragged node positions, and the newest callback closures still receive events. Replace `graph` only when the data itself changes, because new node membership intentionally refits the viewport.
 
 For a server-rendered shell, `mountRadiusGraph(element, props)` mounts this same component and returns `update(props): boolean` and idempotent `unmount()`. It is a compatibility boundary, not a separate renderer. Canvas keeps SDK interaction, local HTTP, source-opening fallback, worktree context, and workflow orchestration in `packages/adapter-canvas`.
 

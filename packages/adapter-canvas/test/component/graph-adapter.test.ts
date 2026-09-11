@@ -47,21 +47,25 @@ describe("Canvas entry with the canonical renderer in Chromium", () => {
       );
       const legend = await within(real.host).findByText("Pending / deploying");
       const legendBox = legend.getBoundingClientRect();
-      expect(legendBox.top - note.getBoundingClientRect().bottom).toBe(12);
+      // Geometry derived by subtracting two rects is fractional, so compare the
+      // incumbent spacing to within a twentieth of a pixel rather than exactly.
+      expect(legendBox.top - note.getBoundingClientRect().bottom).toBeCloseTo(
+        12,
+        1
+      );
       expect(getComputedStyle(legend).fontSize).toBe("12px");
-      expect(legendBox.height).toBe(20);
-      expect(
-        legend.querySelector("img")?.getBoundingClientRect()
-      ).toMatchObject({
-        width: 14,
-        height: 14,
-        top: legendBox.top + 3
-      });
+      expect(legendBox.height).toBeCloseTo(20, 1);
+      const spinner = legend.querySelector("img")?.getBoundingClientRect();
+      expect(spinner?.width).toBeCloseTo(14, 1);
+      expect(spinner?.height).toBeCloseTo(14, 1);
+      expect((spinner?.top ?? 0) - legendBox.top).toBeCloseTo(3, 1);
       const viewport = real.host.querySelector(".radius-graph__viewport");
       if (!(viewport instanceof HTMLElement))
         throw new Error("Canvas did not render the shared drawing area");
-      expect(viewport.getBoundingClientRect().top - legendBox.bottom).toBe(8);
-      expect(viewport.getBoundingClientRect().height).toBe(450);
+      expect(
+        viewport.getBoundingClientRect().top - legendBox.bottom
+      ).toBeCloseTo(8, 1);
+      expect(viewport.getBoundingClientRect().height).toBeCloseTo(450, 1);
       expect(getComputedStyle(viewport).borderRadius).toBe("10px");
       expect(getComputedStyle(real.host).backgroundColor).toBe(
         "rgba(0, 0, 0, 0)"
@@ -70,10 +74,9 @@ describe("Canvas entry with the canonical renderer in Chromium", () => {
         name: "zoom in"
       });
       expect(getComputedStyle(control).boxSizing).toBe("content-box");
-      expect(control.getBoundingClientRect()).toMatchObject({
-        width: 36,
-        height: 37
-      });
+      const controlBox = control.getBoundingClientRect();
+      expect(controlBox.width).toBeCloseTo(36, 1);
+      expect(controlBox.height).toBeCloseTo(37, 1);
     }
   );
 

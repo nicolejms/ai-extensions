@@ -61,12 +61,24 @@ const EMPTY_CALLBACKS: GraphCallbacks = {};
 const EMPTY_OPTIONS = {};
 const NODE_TYPES = { rad: ResourceNode };
 const FIT_OPTIONS = { padding: 0.18 };
+// Only these callbacks cross a memoized boundary, so only these need a stable
+// facade. `onSelect` and `onDetails` fire through a ref, and `onRetry` is read
+// from props by the error boundary, so all three stay current on their own.
+const FORWARDED_CALLBACKS = [
+  "onOpenExternal",
+  "onOpenSource",
+  "onNavigate"
+] as const satisfies readonly (keyof GraphCallbacks)[];
 
 function GraphContent({
   graph,
   options = EMPTY_OPTIONS,
   callbacks = EMPTY_CALLBACKS
 }: RadiusGraphProps): ReactElement {
+  // Hosts routinely pass an inline options object. Keying on its identity would
+  // rebuild the graph and reset dragged node positions on every unrelated host
+  // render, so key on the option values instead. Every option is a primitive.
+  const optionsKey = JSON.stringify(options);
   const settings: GraphSettings = useMemo(
     () =>
       resolveGraphSettings({
@@ -76,7 +88,7 @@ function GraphContent({
         plannedMode: graph.kind === "planned",
         deployMode: graph.kind === "deployed-projection"
       }),
-    [options, graph.kind]
+    [optionsKey, graph.kind]
   );
   const built = useMemo(() => {
     const resources: GraphResource[] = graph.resources.map((resource) => ({
@@ -97,6 +109,26 @@ function GraphContent({
   const panelId = useId();
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
+  // An inline callbacks object changes identity on every host render. Depending
+  // on that identity would tear down and rebuild the open details panel each
+  // time, losing the open node and the focus to restore. Presence still decides
+  // which affordances render, so track that rather than the object.
+  const callbackPresence = FORWARDED_CALLBACKS.map((name) =>
+    callbacks[name] ? "1" : "0"
+  ).join("");
+  const stableCallbacks = useMemo<GraphCallbacks>(() => {
+    const current = callbacksRef.current;
+    const facade: GraphCallbacks = {};
+    if (current.onOpenExternal)
+      facade.onOpenExternal = (url) =>
+        callbacksRef.current.onOpenExternal?.(url);
+    if (current.onOpenSource)
+      facade.onOpenSource = (source) =>
+        callbacksRef.current.onOpenSource?.(source);
+    if (current.onNavigate)
+      facade.onNavigate = (node) => callbacksRef.current.onNavigate?.(node);
+    return facade;
+  }, [callbackPresence]);
   const signature = JSON.stringify([
     graph.kind,
     graph.kind === "live" ? graphContextKey(graph.context) : "",
@@ -148,11 +180,11 @@ function GraphContent({
       container,
       settings,
       {
-        openExternal: callbacks.onOpenExternal,
+        openExternal: stableCallbacks.onOpenExternal,
         openLocalSource:
-          callbacks.onOpenSource ?
+          stableCallbacks.onOpenSource ?
             (path, line, fallbackUrl) =>
-              callbacks.onOpenSource?.({ path, line, fallbackUrl })
+              stableCallbacks.onOpenSource?.({ path, line, fallbackUrl })
           : undefined
       },
       `node-popup-${panelId}`
@@ -167,7 +199,7 @@ function GraphContent({
       panel.destroy();
       panelRef.current = null;
     };
-  }, [settings, callbacks, panelId]);
+  }, [settings, stableCallbacks, panelId]);
 
   const showDetails = useCallback(
     (node: GraphNodeData, card: HTMLElement, toggle: boolean) => {
@@ -181,8 +213,8 @@ function GraphContent({
     []
   );
   const interaction = useMemo(
-    () => ({ settings, callbacks, showDetails }),
-    [settings, callbacks, showDetails]
+    () => ({ settings, callbacks: stableCallbacks, showDetails }),
+    [settings, stableCallbacks, showDetails]
   );
   const legend =
     !settings.showLegend || settings.diffMode ? ""

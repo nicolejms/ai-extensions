@@ -3,12 +3,14 @@ import assert from "node:assert/strict";
 const publicExports = {
   "@radius-project/core": {
     "./graph": "./dist/graph/index",
-    "./domain": "./dist/domain/index"
+    "./domain": "./dist/domain/index",
+    "./package.json": "./package.json"
   },
   "@radius-project/graph-react": {
     ".": "./dist/index",
     "./presentation": "./dist/presentation",
-    "./styles.css": "./dist/styles.css"
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json"
   }
 };
 
@@ -25,7 +27,7 @@ export function validateLibraryManifest(manifest, name, coreVersion) {
     Object.keys(expected).sort()
   );
   for (const [subpath, target] of Object.entries(expected)) {
-    if (subpath === "./styles.css") {
+    if (subpath === "./styles.css" || subpath === "./package.json") {
       assert.equal(manifest.exports[subpath], target);
     } else {
       assert.deepEqual(manifest.exports[subpath], {

@@ -8,13 +8,14 @@ import dagre from "dagre";
 import { page } from "vitest/browser";
 import { screen, waitFor, within } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
-import { createElement as h } from "react";
+import { createElement as h, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { normalizeLiveGraph } from "@radius-project/core/graph";
 import { RadiusGraph } from "./graph.js";
 import { buildGraph, resolveGraphSettings } from "./build.js";
 import { mountRadiusGraph } from "./mount.js";
 import type { GraphResource } from "./model.js";
+import type { ReactElement } from "react";
 import type { RadiusGraphProps } from "./graph.js";
 import "./styles.css";
 
@@ -372,6 +373,76 @@ describe("public host-neutral React API", () => {
     await userEvent.keyboard("{Escape}");
     expect(document.activeElement).toBe(firstButton);
     expect(secondButton).toBeTruthy();
+  });
+
+  it("keeps details open across host renders that pass inline options and callbacks", async () => {
+    const { root, element } = host();
+    // The graph object is the one reference the README asks hosts to keep
+    // stable. Options and callbacks are inlined the way its example shows.
+    const graph: RadiusGraphProps["graph"] = {
+      kind: "modeled",
+      resources: RESOURCES
+    };
+    const sourced: string[] = [];
+    const control: { bump?: () => void } = {};
+    function HostApp(): ReactElement {
+      const [tick, setTick] = useState(0);
+      control.bump = () => setTick((value) => value + 1);
+      return h(RadiusGraph, {
+        graph,
+        options: { localSource: true },
+        callbacks: {
+          onOpenSource: ({ path }) => sourced.push(`${tick}:${path}`),
+          onOpenExternal: (url) => sourced.push(`${tick}:${url}`),
+          onSelect: () => sourced.push(`${tick}:select`),
+          onDetails: () => sourced.push(`${tick}:details`),
+          onNavigate: () => sourced.push(`${tick}:navigate`),
+          onRetry: () => sourced.push(`${tick}:retry`)
+        }
+      });
+    }
+    root.render(h(HostApp));
+
+    const web = await within(element).findByRole("group", { name: "web" });
+    await userEvent.click(
+      within(web).getByRole("button", { name: "Show details" })
+    );
+    const panel = element.querySelector("[data-radius-details]");
+    expect(panel?.getAttribute("style")).not.toMatch(/display:\s*none/);
+    expect(sourced).toEqual(["0:select", "0:details"]);
+
+    control.bump?.();
+    await userEvent.click(
+      within(web).getByRole("link", { name: /View source code/ })
+    );
+    // Proves the host really re-rendered and that the stable facade forwards to
+    // the newest closure rather than one captured when the panel was created.
+    expect(sourced.at(-1)).toBe("1:src/web.ts");
+    // The panel survived that render instead of being destroyed and rebuilt,
+    // which would have dropped the open node and the focus to restore.
+    expect(element.querySelector("[data-radius-details]")).toBe(panel);
+    expect(panel?.getAttribute("style")).not.toMatch(/display:\s*none/);
+  });
+
+  it("exposes the documented root and viewport styling contract", async () => {
+    const { root, element } = host();
+    root.render(
+      h(RadiusGraph, { graph: { kind: "modeled", resources: RESOURCES } })
+    );
+    await within(element).findByRole("group", { name: "web" });
+    const surface = element.querySelector<HTMLElement>(".radius-graph");
+    // README documents exactly these two classes as a host styling contract,
+    // so a host may size the drawing area without reaching into internals.
+    const viewport = surface?.querySelector<HTMLElement>(
+      ":scope > .radius-graph__viewport"
+    );
+    expect(viewport).toBeTruthy();
+    expect(viewport?.querySelector(".react-flow")).toBeTruthy();
+    // The component contributes no height of its own: it fills the 900x600
+    // box this host gave it, which is what lets a host own graph layout.
+    const box = viewport?.getBoundingClientRect();
+    expect(box?.width).toBeCloseTo(900, 1);
+    expect(box?.height).toBeCloseTo(600, 1);
   });
 
   it("does not expose details controls when the host disables that capability", async () => {
@@ -873,13 +944,12 @@ describe("graph view in a real browser", () => {
     expect(controls).toHaveLength(3);
     for (const control of controls) {
       expect(getComputedStyle(control).boxSizing).toBe("content-box");
-      expect(control.getBoundingClientRect()).toMatchObject({
-        width: 36,
-        height: 37
-      });
+      const box = control.getBoundingClientRect();
+      expect(box.width).toBeCloseTo(36, 1);
+      expect(box.height).toBeCloseTo(37, 1);
       const glyph = control.querySelector("svg");
       if (!glyph) throw new Error("Graph control has no glyph");
-      expect(glyph.getBoundingClientRect().width).toBe(12);
+      expect(glyph.getBoundingClientRect().width).toBeCloseTo(12, 1);
       expect(glyph.getBoundingClientRect().height).toBeCloseTo(
         (12 * glyph.viewBox.baseVal.height) / glyph.viewBox.baseVal.width
       );

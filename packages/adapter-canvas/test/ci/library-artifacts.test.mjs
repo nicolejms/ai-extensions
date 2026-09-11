@@ -22,7 +22,8 @@ function manifest() {
         import: "./dist/presentation.js",
         default: "./dist/presentation.js"
       },
-      "./styles.css": "./dist/styles.css"
+      "./styles.css": "./dist/styles.css",
+      "./package.json": "./package.json"
     },
     dependencies: {
       "@radius-project/core": "0.1.0",
@@ -89,22 +90,31 @@ describe("packed library contracts", () => {
       name: "@radius-project/core",
       type: "module",
       license: "Apache-2.0",
-      exports: Object.fromEntries(
-        ["graph", "domain"].map((subpath) => [
-          `./${subpath}`,
-          {
-            types: `./dist/${subpath}/index.d.ts`,
-            import: `./dist/${subpath}/index.js`,
-            default: `./dist/${subpath}/index.js`
-          }
-        ])
-      )
+      exports: {
+        ...Object.fromEntries(
+          ["graph", "domain"].map((subpath) => [
+            `./${subpath}`,
+            {
+              types: `./dist/${subpath}/index.d.ts`,
+              import: `./dist/${subpath}/index.js`,
+              default: `./dist/${subpath}/index.js`
+            }
+          ])
+        ),
+        "./package.json": "./package.json"
+      }
     };
     expect(() =>
       validateLibraryManifest(core, core.name, "0.1.0")
     ).not.toThrow();
     core.exports["."] = "./src/index.ts";
     expect(() => validateLibraryManifest(core, core.name, "0.1.0")).toThrow();
+  });
+
+  it("rejects a library that hides its own manifest from consumers", () => {
+    const value = manifest();
+    delete value.exports["./package.json"];
+    expect(() => validateLibraryManifest(value, value.name, "0.1.0")).toThrow();
   });
 
   it("rejects unrecognized library manifests", () => {

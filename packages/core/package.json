@@ -30,7 +30,8 @@
         "types": "./dist/domain/index.d.ts",
         "import": "./dist/domain/index.js",
         "default": "./dist/domain/index.js"
-      }
+      },
+      "./package.json": "./package.json"
     }
   },
   "scripts": {
