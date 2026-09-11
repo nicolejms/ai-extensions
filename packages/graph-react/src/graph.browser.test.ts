@@ -24,9 +24,9 @@ const RESOURCES = [
     name: "web",
     type: "Radius.Compute/containers",
     codeReference: "src/web.ts#L4",
-    connections: [{ id: "app/db" }],
+    connections: [{ id: "app/db" }]
   },
-  { id: "app/db", name: "db", type: "Radius.Data/sqlDatabases" },
+  { id: "app/db", name: "db", type: "Radius.Data/sqlDatabases" }
 ];
 
 interface Recorded {
@@ -57,7 +57,7 @@ function mount(
     baseBranch?: string;
     workspaceBranch?: string;
     resources?: GraphResource[];
-  } = {},
+  } = {}
 ): Mounted {
   const settings = resolveGraphSettings({
     localSource: options.localSource ?? true,
@@ -66,7 +66,7 @@ function mount(
     baseBranch: options.baseBranch,
     workspaceBranch: options.workspaceBranch,
     repoUrl: "https://github.test/o/r",
-    branch: "feature-branch",
+    branch: "feature-branch"
   });
   const host = document.createElement("div");
   host.style.width = "800px";
@@ -77,13 +77,12 @@ function mount(
     local: [],
     toggled: [],
     opened: [],
-    reloads: 0,
+    reloads: 0
   };
-  const kind = options.diffMode
-    ? "diff"
-    : options.deployMode
-      ? "deployed-projection"
-      : "modeled";
+  const kind =
+    options.diffMode ? "diff"
+    : options.deployMode ? "deployed-projection"
+    : "modeled";
   const props: RadiusGraphProps = {
     graph: { kind, resources: options.resources ?? RESOURCES },
     options: settings,
@@ -95,14 +94,14 @@ function mount(
       onSelect: (data) => recorded.opened.push(data.id),
       onRetry: () => {
         recorded.reloads++;
-      },
-    },
+      }
+    }
   };
   const root = mountRadiusGraph(host, props);
   const graph = {
     update: (resources: GraphResource[]) =>
       root.update({ ...props, graph: { kind, resources } }),
-    unmount: () => root.unmount(),
+    unmount: () => root.unmount()
   };
   disposers.push(() => {
     graph.unmount();
@@ -130,18 +129,18 @@ describe("public host-neutral React API", () => {
   const context = {
     connectionId: "first",
     plane: { type: "radius", name: "local" },
-    applicationId: prefix + "Radius.Core/applications/app",
+    applicationId: prefix + "Radius.Core/applications/app"
   };
   const resource = {
     id: prefix + "Radius.Core/containers/live-web",
     name: "live-web",
     type: "Radius.Core/containers",
-    provisioningState: "CustomPending",
+    provisioningState: "CustomPending"
   };
 
   it("rejects a non-DOM mount target", () => {
     expect(() =>
-      mountRadiusGraph({}, { graph: { kind: "modeled", resources: [] } }),
+      mountRadiusGraph({}, { graph: { kind: "modeled", resources: [] } })
     ).toThrow(TypeError);
   });
 
@@ -152,12 +151,12 @@ describe("public host-neutral React API", () => {
       kind: "live" as const,
       context: { ...context, applicationId: "invalid" },
       resources: [],
-      warnings: [],
+      warnings: []
     };
     root.render(h(RadiusGraph, { graph: failed }));
     expect(await within(element).findByRole("alert")).toBeTruthy();
     expect(
-      within(element).queryByRole("button", { name: "Reload graph" }),
+      within(element).queryByRole("button", { name: "Reload graph" })
     ).toBeNull();
     let retried = false;
     root.render(
@@ -170,16 +169,16 @@ describe("public host-neutral React API", () => {
               h(RadiusGraph, {
                 graph: {
                   kind: "modeled",
-                  resources: [{ id: "fixed", name: "fixed" }],
-                },
-              }),
+                  resources: [{ id: "fixed", name: "fixed" }]
+                }
+              })
             );
-          },
-        },
-      }),
+          }
+        }
+      })
     );
     await userEvent.click(
-      await within(element).findByRole("button", { name: "Reload graph" }),
+      await within(element).findByRole("button", { name: "Reload graph" })
     );
     expect(retried).toBe(true);
     await within(element).findByRole("group", { name: "fixed" });
@@ -197,19 +196,19 @@ describe("public host-neutral React API", () => {
           kind: "planned",
           resources: [
             { id: "web", name: "web" },
-            { id: "db", name: "db" },
-          ],
+            { id: "db", name: "db" }
+          ]
         },
-        options: { showLegend: true },
-      }),
+        options: { showLegend: true }
+      })
     );
     await within(element).findByRole("group", { name: "web" });
     expect(within(element).getByRole("status").textContent).toContain(
-      "Layout failed",
+      "Layout failed"
     );
     await page.getByRole("group", { name: "db", exact: true }).click();
     expect(
-      element.querySelector("[data-radius-details]")?.getAttribute("style"),
+      element.querySelector("[data-radius-details]")?.getAttribute("style")
     ).not.toMatch(/display:\s*none/);
   });
 
@@ -217,38 +216,38 @@ describe("public host-neutral React API", () => {
     const { root, element } = host();
     root.render(
       h(RadiusGraph, {
-        graph: normalizeLiveGraph({ resources: [resource] }, context),
-      }),
+        graph: normalizeLiveGraph({ resources: [resource] }, context)
+      })
     );
     await userEvent.click(
-      await within(element).findByRole("button", { name: "Show details" }),
+      await within(element).findByRole("button", { name: "Show details" })
     );
     root.render(
       h(RadiusGraph, {
         graph: normalizeLiveGraph(
           {
-            resources: [{ ...resource, provisioningState: "Refreshed" }],
+            resources: [{ ...resource, provisioningState: "Refreshed" }]
           },
-          context,
-        ),
-      }),
+          context
+        )
+      })
     );
     await within(element).findByText("Provisioning status: Refreshed");
     expect(
-      element.querySelector("[data-radius-details]")?.getAttribute("style"),
+      element.querySelector("[data-radius-details]")?.getAttribute("style")
     ).not.toMatch(/display:\s*none/);
     root.render(
       h(RadiusGraph, {
         graph: normalizeLiveGraph(
           { resources: [resource] },
-          { ...context, connectionId: "second" },
-        ),
-      }),
+          { ...context, connectionId: "second" }
+        )
+      })
     );
     await waitFor(() =>
       expect(
-        element.querySelector("[data-radius-details]")?.getAttribute("style"),
-      ).toMatch(/display:\s*none/),
+        element.querySelector("[data-radius-details]")?.getAttribute("style")
+      ).toMatch(/display:\s*none/)
     );
   });
 
@@ -258,19 +257,19 @@ describe("public host-neutral React API", () => {
       h(RadiusGraph, {
         graph: {
           kind: "deployed-projection",
-          resources: [{ id: "web", name: "web", deployStatus: "failed" }],
+          resources: [{ id: "web", name: "web", deployStatus: "failed" }]
         },
         options: { showLegend: true },
         style: { colorScheme: "dark" },
         className: "host-class",
-        ariaLabel: "Host graph",
-      }),
+        ariaLabel: "Host graph"
+      })
     );
     await within(element).findByRole("group", { name: "web" });
     expect(element.querySelector(".legend")?.textContent).toContain("Failed");
     expect(
       within(element).getByRole("region", { name: "Host graph" }).style
-        .colorScheme,
+        .colorScheme
     ).toBe("dark");
     expect(element.querySelector(".host-class")).not.toBeNull();
   });
@@ -285,62 +284,62 @@ describe("public host-neutral React API", () => {
         theme: { background: "#101010", text: "#ffffff", colorScheme: "dark" },
         callbacks: {
           onSelect: (node) => selected.push(node.id),
-          onNavigate: (node) => navigated.push(node.id),
-        },
-      }),
+          onNavigate: (node) => navigated.push(node.id)
+        }
+      })
     );
     const node = await within(element).findByRole("group", {
-      name: "live-web",
+      name: "live-web"
     });
     expect(
-      within(node).getByLabelText("Provisioning status: CustomPending"),
+      within(node).getByLabelText("Provisioning status: CustomPending")
     ).toBeTruthy();
     expect(within(node).queryByText("View source code")).toBeNull();
     expect(within(node).queryByAltText("Deployed")).toBeNull();
     await userEvent.click(
-      within(node).getByRole("button", { name: "Show details" }),
+      within(node).getByRole("button", { name: "Show details" })
     );
     expect(selected).toEqual([resource.id]);
     expect(
-      await within(element).findByText("Provisioning status: CustomPending"),
+      await within(element).findByText("Provisioning status: CustomPending")
     ).toBeTruthy();
     await userEvent.click(
-      within(node).getByRole("button", { name: "Open live-web" }),
+      within(node).getByRole("button", { name: "Open live-web" })
     );
     expect(navigated).toEqual([resource.id]);
     expect(
-      element.querySelector(".radius-graph")?.getAttribute("style"),
+      element.querySelector(".radius-graph")?.getAttribute("style")
     ).toContain("color-scheme: dark");
   });
 
   it("renders explicit empty and partial states and updates without replacing the React root", async () => {
     const { root, element } = host();
     root.render(
-      h(RadiusGraph, { graph: normalizeLiveGraph({ resources: [] }, context) }),
+      h(RadiusGraph, { graph: normalizeLiveGraph({ resources: [] }, context) })
     );
     expect(await within(element).findByRole("status")).toHaveProperty(
       "textContent",
-      "No resources in this application.",
+      "No resources in this application."
     );
     const graph = normalizeLiveGraph(
       {
         resources: [
           {
             ...resource,
-            connections: [{ id: "missing" }],
-          },
-        ],
+            connections: [{ id: "missing" }]
+          }
+        ]
       },
-      context,
+      context
     );
     root.render(h(RadiusGraph, { graph }));
     await within(element).findByRole("group", { name: "live-web" });
     expect(within(element).getByRole("status").textContent).toContain(
-      "missing",
+      "missing"
     );
     root.render(h(RadiusGraph, { graph: { kind: "modeled", resources: [] } }));
     expect(
-      await within(element).findByText("No resources in this application."),
+      await within(element).findByText("No resources in this application.")
     ).toBeTruthy();
   });
 
@@ -356,10 +355,10 @@ describe("public host-neutral React API", () => {
     first.root.render(h(RadiusGraph, { graph }));
     second.root.render(h(RadiusGraph, { graph }));
     const firstButton = await within(first.element).findByRole("button", {
-      name: "Show details",
+      name: "Show details"
     });
     const secondButton = await within(second.element).findByRole("button", {
-      name: "Show details",
+      name: "Show details"
     });
     firstButton.focus();
     await userEvent.keyboard("{Enter}");
@@ -378,12 +377,12 @@ describe("public host-neutral React API", () => {
     root.render(
       h(RadiusGraph, {
         graph: normalizeLiveGraph({ resources: [resource] }, context),
-        options: { enablePopup: false },
-      }),
+        options: { enablePopup: false }
+      })
     );
     await within(element).findByRole("group", { name: "live-web" });
     expect(
-      within(element).queryByRole("button", { name: "Show details" }),
+      within(element).queryByRole("button", { name: "Show details" })
     ).toBeNull();
     expect(element.querySelector("[data-radius-details]")).toBeNull();
     await page.getByRole("group", { name: "live-web", exact: true }).click();
@@ -397,12 +396,12 @@ describe("public host-neutral React API", () => {
       h(RadiusGraph, {
         graph: { kind: "modeled", resources: RESOURCES },
         options: { localSource: true },
-        callbacks: { onOpenSource },
-      }),
+        callbacks: { onOpenSource }
+      })
     );
     const web = await within(element).findByRole("group", { name: "web" });
     const source = within(web).getByRole("link", {
-      name: /View source code/,
+      name: /View source code/
     });
     expect(source.getAttribute("href")).toBe("#");
     const previousLocation = window.location.href;
@@ -410,7 +409,7 @@ describe("public host-neutral React API", () => {
     expect(onOpenSource).toHaveBeenCalledExactlyOnceWith({
       path: "src/web.ts",
       line: 4,
-      fallbackUrl: "",
+      fallbackUrl: ""
     });
     expect(window.location.href).toBe(previousLocation);
   });
@@ -422,27 +421,27 @@ describe("public host-neutral React API", () => {
         graph: {
           kind: "modeled",
           resources: [
-            { id: "source", name: "source", codeReference: "src/web.ts#L4" },
-          ],
+            { id: "source", name: "source", codeReference: "src/web.ts#L4" }
+          ]
         },
         options: {
           repoUrl: "https://github.com/example/app",
           branch: "main",
-          localSource: true,
-        },
-      }),
+          localSource: true
+        }
+      })
     );
     const source = await within(element).findByRole("link", {
-      name: /View source code/,
+      name: /View source code/
     });
     expect(source.getAttribute("href")).toBe(
-      "https://github.com/example/app/blob/main/src/web.ts#L4",
+      "https://github.com/example/app/blob/main/src/web.ts#L4"
     );
     expect(source.getAttribute("target")).toBe("_blank");
     source.addEventListener("click", (event) => event.preventDefault());
     await userEvent.click(source);
     expect(
-      element.querySelector("[data-radius-details]")?.getAttribute("style"),
+      element.querySelector("[data-radius-details]")?.getAttribute("style")
     ).toMatch(/display:\s*none/);
   });
 });
@@ -462,8 +461,8 @@ function maximumChannelDelta(left: string, right: string): number {
   }
   return Math.max(
     ...leftChannels.map((channel, index) =>
-      Math.abs(channel - rightChannels[index]),
-    ),
+      Math.abs(channel - rightChannels[index])
+    )
   );
 }
 
@@ -485,13 +484,13 @@ describe("graph view in a real browser", () => {
     const { host, recorded } = mount({ localSource: true });
     const web = await card("web");
     await userEvent.click(
-      within(web).getByRole("button", { name: "Show details" }),
+      within(web).getByRole("button", { name: "Show details" })
     );
     const panel = host.querySelector("[data-radius-details]");
     if (!(panel instanceof HTMLElement))
       throw new Error("missing details panel");
     await userEvent.click(
-      within(panel).getByRole("link", { name: "View source code" }),
+      within(panel).getByRole("link", { name: "View source code" })
     );
     expect(recorded.local).toHaveLength(1);
     expect(recorded.local[0][0]).toContain("src/");
@@ -504,13 +503,13 @@ describe("graph view in a real browser", () => {
         {
           id: "portal",
           name: "portal",
-          portalUrl: "https://portal.azure.com/#test",
-        },
-      ],
+          portalUrl: "https://portal.azure.com/#test"
+        }
+      ]
     });
     const node = await card("portal");
     const link = within(node).getByRole("link", {
-      name: "Open portal in Azure Portal",
+      name: "Open portal in Azure Portal"
     });
     link.addEventListener("click", (event) => event.preventDefault());
     await userEvent.click(link);
@@ -523,30 +522,30 @@ describe("graph view in a real browser", () => {
         { id: "added", name: "added", diffStatus: "added" },
         { id: "removed", name: "removed", diffStatus: "removed" },
         { id: "modified", name: "modified", diffStatus: "modified" },
-        { id: "unchanged", name: "unchanged", diffStatus: "unchanged" },
-      ],
+        { id: "unchanged", name: "unchanged", diffStatus: "unchanged" }
+      ]
     });
 
     const styles = await Promise.all(
       ["added", "removed", "modified", "unchanged"].map(async (name) =>
-        getComputedStyle(await card(name)),
-      ),
+        getComputedStyle(await card(name))
+      )
     );
     const changed = styles.slice(0, 3);
 
     expect(
-      new Set(changed.map(({ backgroundColor }) => backgroundColor)),
+      new Set(changed.map(({ backgroundColor }) => backgroundColor))
     ).toHaveLength(3);
     expect(new Set(changed.map(({ borderColor }) => borderColor))).toHaveLength(
-      3,
+      3
     );
     for (let left = 0; left < changed.length; left += 1) {
       for (let right = left + 1; right < changed.length; right += 1) {
         expect(
           maximumChannelDelta(
             changed[left].backgroundColor,
-            changed[right].backgroundColor,
-          ),
+            changed[right].backgroundColor
+          )
         ).toBeGreaterThanOrEqual(4);
       }
     }
@@ -580,9 +579,9 @@ describe("graph view in a real browser", () => {
           id: "app/recommendation",
           name,
           type: "Radius.Compute/containers",
-          deployStatus: "success",
-        },
-      ],
+          deployStatus: "success"
+        }
+      ]
     });
 
     const recommendation = await card(name);
@@ -614,20 +613,20 @@ describe("graph view in a real browser", () => {
             {
               id: "/subscriptions/s/resourceGroups/rg/providers/Microsoft.DBforMySQL/flexibleServers/server",
               type: "Microsoft.DBforMySQL/flexibleServers",
-              portalUrl: "https://portal.azure.com/#@tenant/resource/server",
+              portalUrl: "https://portal.azure.com/#@tenant/resource/server"
             },
             {
               id: "database",
-              type: "Microsoft.DBforMySQL/flexibleServers/databases",
-            },
-          ],
-        },
-      ],
+              type: "Microsoft.DBforMySQL/flexibleServers/databases"
+            }
+          ]
+        }
+      ]
     });
 
     const mysql = await card("mysql");
     expect(
-      within(mysql).getByTitle("Microsoft.DBforMySQL/flexibleServers"),
+      within(mysql).getByTitle("Microsoft.DBforMySQL/flexibleServers")
     ).toBeTruthy();
     expect(mysql.getAttribute("data-node-id")).toBe("mysql");
 
@@ -636,10 +635,10 @@ describe("graph view in a real browser", () => {
       throw new Error("deployed node has no native portal link");
     }
     expect(portal.getAttribute("aria-label")).toBe(
-      "Open mysql in Azure Portal",
+      "Open mysql in Azure Portal"
     );
     expect(portal.getAttribute("href")).toBe(
-      "https://portal.azure.com/#@tenant/resource/server",
+      "https://portal.azure.com/#@tenant/resource/server"
     );
     expect(portal.getAttribute("target")).toBe("_blank");
     expect(recorded.opened).toEqual([]);
@@ -654,7 +653,7 @@ describe("graph view in a real browser", () => {
     // buildGraph declares web -> db, and the layout is configured top to bottom,
     // so the real engine must put the target below the source.
     expect(db.getBoundingClientRect().top).toBeGreaterThan(
-      web.getBoundingClientRect().bottom,
+      web.getBoundingClientRect().bottom
     );
   });
 
@@ -662,7 +661,7 @@ describe("graph view in a real browser", () => {
     const { recorded } = mount();
     const web = await card("web");
     const details = await within(web).findByRole("button", {
-      name: "Show details",
+      name: "Show details"
     });
 
     details.focus();
@@ -681,7 +680,7 @@ describe("graph view in a real browser", () => {
     const { recorded } = mount({ localSource: true });
     const web = await card("web");
     const link = await within(web).findByRole("link", {
-      name: /View source code/,
+      name: /View source code/
     });
 
     await userEvent.click(link);
@@ -699,13 +698,13 @@ describe("graph view in a real browser", () => {
     const { recorded } = mount({ localSource: false });
     const web = await card("web");
     const link = await within(web).findByRole("link", {
-      name: /View source code/,
+      name: /View source code/
     });
 
     await userEvent.click(link);
 
     expect(recorded.external).toEqual([
-      "https://github.test/o/r/blob/feature-branch/src/web.ts#L4",
+      "https://github.test/o/r/blob/feature-branch/src/web.ts#L4"
     ]);
     expect(document.body.contains(link)).toBe(true);
     expect(recorded.opened).toEqual([]);
@@ -719,13 +718,13 @@ describe("graph view in a real browser", () => {
       resources: [
         {
           ...RESOURCES[0],
-          codeReference: sourceUrl,
-        },
-      ],
+          codeReference: sourceUrl
+        }
+      ]
     });
     const web = await card("web");
     const link = await within(web).findByRole("link", {
-      name: /View source code/,
+      name: /View source code/
     });
 
     await userEvent.click(link);
@@ -749,21 +748,21 @@ describe("graph view in a real browser", () => {
           name: "web",
           type: "Radius.Compute/containers",
           codeReference: "src/web.ts#L4",
-          diffStatus: "added",
+          diffStatus: "added"
         },
         {
           id: "app/old-worker",
           name: "old-worker",
           type: "Radius.Compute/containers",
           codeReference: "src/worker.ts#L9",
-          diffStatus: "removed",
-        },
-      ],
+          diffStatus: "removed"
+        }
+      ]
     });
 
     const web = await card("web");
     await userEvent.click(
-      await within(web).findByRole("link", { name: /View source code/ }),
+      await within(web).findByRole("link", { name: /View source code/ })
     );
 
     expect(recorded.local).toEqual([["src/web.ts", 4, expect.any(String)]]);
@@ -771,12 +770,12 @@ describe("graph view in a real browser", () => {
 
     const worker = await card("old-worker");
     await userEvent.click(
-      await within(worker).findByRole("link", { name: /View source code/ }),
+      await within(worker).findByRole("link", { name: /View source code/ })
     );
 
     expect(recorded.local).toHaveLength(1);
     expect(recorded.external).toEqual([
-      "https://github.test/o/r/blob/main/src/worker.ts#L9",
+      "https://github.test/o/r/blob/main/src/worker.ts#L9"
     ]);
   });
 
@@ -791,19 +790,19 @@ describe("graph view in a real browser", () => {
           name: "web",
           type: "Radius.Compute/containers",
           codeReference: "src/web.ts#L4",
-          diffStatus: "added",
-        },
-      ],
+          diffStatus: "added"
+        }
+      ]
     });
 
     const web = await card("web");
     await userEvent.click(
-      await within(web).findByRole("link", { name: /View source code/ }),
+      await within(web).findByRole("link", { name: /View source code/ })
     );
 
     expect(recorded.local).toEqual([]);
     expect(recorded.external).toEqual([
-      "https://github.test/o/r/blob/feature-branch/src/web.ts#L4",
+      "https://github.test/o/r/blob/feature-branch/src/web.ts#L4"
     ]);
   });
 
@@ -812,7 +811,7 @@ describe("graph view in a real browser", () => {
     const db = await card("db");
 
     const row = await within(db).findByRole("button", {
-      name: /View source code/,
+      name: /View source code/
     });
     expect(row.getAttribute("aria-disabled")).toBe("true");
     expect(within(db).queryByRole("link")).toBeNull();
@@ -848,13 +847,13 @@ describe("graph view in a real browser", () => {
 
     const settings = resolveGraphSettings({ localSource: true });
     const next = buildGraph(settings, [
-      { id: "app/cache", name: "cache", type: "Radius.Data/redisCaches" },
+      { id: "app/cache", name: "cache", type: "Radius.Data/redisCaches" }
     ]);
     expect(graph.update(next.resources)).toBe(true);
 
     await waitFor(() => expect(screen.queryByText("web")).toBeNull());
     expect(
-      screen.getByText("cache", { selector: ".rad-node__title" }),
+      screen.getByText("cache", { selector: ".rad-node__title" })
     ).toBeTruthy();
   });
 
@@ -879,14 +878,14 @@ describe("graph view in a real browser", () => {
 
     const settings = resolveGraphSettings({
       localSource: true,
-      deployMode: true,
+      deployMode: true
     });
     const next = buildGraph(
       settings,
       RESOURCES.map((resource) => ({
         ...resource,
-        deployStatus: "success",
-      })),
+        deployStatus: "success"
+      }))
     );
     expect(graph.update(next.resources)).toBe(true);
 
@@ -916,11 +915,11 @@ describe("graph view in a real browser", () => {
     // zoom could leave the new graph off screen entirely.
     const settings = resolveGraphSettings({
       localSource: true,
-      deployMode: true,
+      deployMode: true
     });
     const next = buildGraph(settings, [
       { id: "other/api", name: "api", deployStatus: "success" },
-      { id: "other/cache", name: "cache", deployStatus: "success" },
+      { id: "other/cache", name: "cache", deployStatus: "success" }
     ]);
     expect(graph.update(next.resources)).toBe(true);
 
