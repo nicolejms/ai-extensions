@@ -1,5 +1,5 @@
-// Applies pending Changesets releases for one plugin, or for every plugin when
-// no --plugin is given, then synchronizes the repository's derived manifests.
+// Versions plugins by default, or npm libraries with --libraries. Neither scope
+// consumes the other's queued notes. Plugin versions synchronize manifests.
 //
 // changesets/action executes its `script` input directly rather than through a
 // shell. Keeping both commands in this executable avoids relying on `&&` being
@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { listPlugins, repoRoot, requirePlugin } from "./plugins.mjs";
+import { libraryNames } from "./libraries.mjs";
 
 const require = createRequire(import.meta.url);
 const CONFIG = ".changeset/config.json";
@@ -25,7 +26,18 @@ function option(args, name) {
   return index === -1 ? undefined : args[index + 1];
 }
 
-export function versionPlan(plugins, selectedName, snapshot) {
+export function versionPlan(
+  plugins,
+  selectedName,
+  snapshot,
+  { libraries = [], scope = "plugins" } = {}
+) {
+  if (scope === "libraries" && selectedName) {
+    throw new Error("--libraries cannot be combined with --plugin");
+  }
+  if (scope === "libraries" && libraries.length === 0) {
+    throw new Error("no public npm libraries were discovered");
+  }
   const selected =
     selectedName === undefined || selectedName === "" ?
       undefined
@@ -36,9 +48,15 @@ export function versionPlan(plugins, selectedName, snapshot) {
 
   return {
     args: ["version", ...(snapshot ? ["--snapshot", snapshot] : [])],
-    ignore: plugins
-      .filter((plugin) => selected && plugin.name !== selected.name)
-      .map((plugin) => plugin.name)
+    ignore:
+      scope === "libraries" ?
+        plugins.map((plugin) => plugin.name)
+      : [
+          ...plugins
+            .filter((plugin) => selected && plugin.name !== selected.name)
+            .map((plugin) => plugin.name),
+          ...libraries
+        ]
   };
 }
 
@@ -64,7 +82,7 @@ function run(command, args) {
     encoding: "utf8",
     stdio: "inherit"
   });
-  if (result.error) fail(result.error.message);
+  if (result.error) throw result.error;
   return result.status ?? 1;
 }
 
@@ -72,12 +90,24 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const selectedName = option(args, "--plugin");
   const snapshot = option(args, "--snapshot");
+  if (args.includes("--libraries") && args.includes("--plugin")) {
+    fail("--libraries cannot be combined with --plugin");
+  }
   if (args.includes("--snapshot") && !snapshot) {
     fail("--snapshot requires a name");
   }
   if (selectedName !== undefined) requirePlugin(selectedName);
 
-  const plan = versionPlan(listPlugins(), selectedName, snapshot);
+  const libraryScope = args.includes("--libraries");
+  let plan;
+  try {
+    plan = versionPlan(listPlugins(), selectedName, snapshot, {
+      libraries: libraryNames(),
+      scope: libraryScope ? "libraries" : "plugins"
+    });
+  } catch (error) {
+    fail(error.message);
+  }
   const restore = plan.ignore.length > 0 ? scopeConfig(plan.ignore) : undefined;
   let status;
   try {
@@ -90,9 +120,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   if (status !== 0) process.exit(status);
 
-  const synced = run(process.execPath, [
-    join(repoRoot, "scripts", "version.mjs"),
-    "--sync"
-  ]);
-  if (synced !== 0) process.exit(synced);
+  if (!libraryScope) {
+    const synced = run(process.execPath, [
+      join(repoRoot, "scripts", "version.mjs"),
+      "--sync"
+    ]);
+    if (synced !== 0) process.exit(synced);
+  }
 }

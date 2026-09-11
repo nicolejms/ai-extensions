@@ -51,10 +51,10 @@ export function layoutGraph(
   dagre: DagreLike | null,
   nodes: readonly GraphNode[],
   edges: readonly GraphEdge[]
-): void {
+): string | null {
   if (!dagre) {
     stack(nodes);
-    return;
+    return "Layout unavailable. Resources are displayed in a vertical list.";
   }
   try {
     const graph = new dagre.graphlib.Graph();
@@ -81,16 +81,20 @@ export function layoutGraph(
     dagre.layout(graph);
     for (const node of nodes) {
       const placed = graph.node(node.id);
-      if (placed) {
+      if (placed && Number.isFinite(placed.x) && Number.isFinite(placed.y)) {
         node.position = {
           x: placed.x - GRAPH_NODE_WIDTH / 2,
           y: placed.y - GRAPH_NODE_HEIGHT / 2
         };
+      } else {
+        throw new Error(`Missing finite layout position for ${node.id}`);
       }
     }
+    return null;
   } catch {
     // A layout failure happens before dagre exposes usable placements. Stack the
     // whole graph so placeholder (0, 0) positions do not collapse every card.
     stack(nodes);
+    return "Layout failed. Resources are displayed in a vertical list.";
   }
 }

@@ -25,9 +25,9 @@ import { resolveGraphSettings } from "./build.js";
 import {
   createFakeBrowser,
   createFakeElement
-} from "../../../test/support/browser/fakes.js";
+} from "../../adapter-canvas/test/support/browser/fakes.js";
 import type { GraphNodeData, GraphOptions } from "./build.js";
-import type { DomElement } from "../ports.js";
+import type { DomElement } from "../../adapter-canvas/src/browser/ports.js";
 
 function node(overrides: Partial<GraphNodeData> = {}): GraphNodeData {
   return {
@@ -62,6 +62,20 @@ function settings(options: GraphOptions = {}) {
 }
 
 describe("detail rows", () => {
+  it("shows escaped live metadata and preserves optional raw status", () => {
+    const live = settings({ liveMode: true });
+    const data = node({
+      nodeName: "<web>",
+      resourceType: "<type>",
+      provisioningState: "<pending>",
+      defFile: "",
+      sourceUrl: ""
+    });
+    expect(buildDetailRows(live, data).join("")).toContain("&lt;pending&gt;");
+    expect(
+      buildDetailRows(live, { ...data, provisioningState: undefined }).join("")
+    ).not.toContain("Provisioning status");
+  });
   it("uses inert safe links for invalid direct and local destinations", () => {
     expect(
       linkRow(ICON_LINK, "<label>", "javascript:alert(1)", true)
@@ -440,6 +454,41 @@ function measurable(element: DomElement, rect: Record<string, number>) {
 }
 
 describe("details panel", () => {
+  it("refreshes an open node without losing focus provenance and closes a removed node", () => {
+    const harness = setup({ liveMode: true });
+    const target = createFakeElement("card");
+    harness.panel.refresh({});
+    harness.panel.open(node({ provisioningState: "Before" }), target);
+    harness.panel.refresh({ "app/web": node({ provisioningState: "After" }) });
+    expect(harness.panelElement.innerHTML).toContain("After");
+    expect(harness.panel.isOpen).toBe(true);
+    harness.panel.refresh({});
+    expect(harness.panel.isOpen).toBe(false);
+  });
+  it.each(["data-local-src", "data-external-url"])(
+    "keeps %s navigation native when no host capability is supplied",
+    (attribute) => {
+      const browser = createFakeBrowser();
+      const container = createFakeElement("container");
+      const panel = createDetailsPanel(
+        browser.context,
+        container,
+        settings(),
+        {}
+      );
+      const row = createFakeElement("link");
+      row.ancestors.set(`[${attribute}]`, row);
+      let prevented = false;
+      container.dispatch("click", {
+        target: row,
+        preventDefault: () => {
+          prevented = true;
+        }
+      });
+      expect(prevented).toBe(false);
+      panel.destroy();
+    }
+  );
   it("adds one hidden panel to the container and binds one listener", () => {
     const { container, panelElement } = setup();
     expect(container.appended).toHaveLength(1);
@@ -529,7 +578,7 @@ describe("details panel", () => {
     harness.panel.open(node(), createFakeElement("card"));
 
     const insidePanel = createFakeElement("link");
-    insidePanel.ancestors.set("#" + PANEL_ID, harness.panelElement);
+    insidePanel.ancestors.set("[data-radius-details]", harness.panelElement);
     harness.container.dispatch("click", { target: insidePanel });
     expect(harness.panel.isOpen).toBe(true);
 

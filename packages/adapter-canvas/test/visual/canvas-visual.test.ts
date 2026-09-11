@@ -433,7 +433,7 @@ test.describe("Radius Canvas visual baselines", () => {
     await expect(page.locator("#graph-app")).toHaveValue("radius-app");
     await expect(page.locator("#graph-branch")).toHaveValue(WORKTREE_BRANCH);
     await expectWorktreeBranchRequests(requests.loadGraph);
-    await expect(page.locator("#node-popup")).toBeHidden();
+    await expect(page.locator("[data-radius-details]")).toBeHidden();
     await screenshot(page, "vi-01-modeled-graph-light.png");
   });
 
@@ -452,7 +452,7 @@ test.describe("Radius Canvas visual baselines", () => {
     await expect(page.locator("#graph-app")).toHaveValue("radius-app");
     await expect(page.locator("#graph-branch")).toHaveValue(WORKTREE_BRANCH);
     await expectWorktreeBranchRequests(requests.loadGraph);
-    await expect(page.locator("#node-popup")).toBeHidden();
+    await expect(page.locator("[data-radius-details]")).toBeHidden();
     await screenshot(page, "vi-01-modeled-graph-dark.png");
   });
 
@@ -476,7 +476,7 @@ test.describe("Radius Canvas visual baselines", () => {
         .filter({ hasText: "web" })
         .getByRole("button", { name: "Show details" })
         .click();
-      await expect(page.locator("#node-popup")).toBeVisible();
+      await expect(page.locator("[data-radius-details]")).toBeVisible();
       await screenshot(page, `vi-02-modeled-graph-details-${theme}.png`);
     });
   }
@@ -521,7 +521,7 @@ test.describe("Radius Canvas visual baselines", () => {
         .filter({ hasText: "cache" })
         .getByRole("button", { name: "Show details" })
         .click();
-      await expect(page.locator("#node-popup")).toContainText(
+      await expect(page.locator("[data-radius-details]")).toContainText(
         "No recipe pack registered in this environment resolves Radius.Data/redisCaches."
       );
       await screenshot(page, `vi-03-planned-unresolved-${theme}.png`);

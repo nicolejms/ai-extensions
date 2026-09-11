@@ -4,7 +4,7 @@
 // explains deploy status, every other page lists the resource categories the
 // current graph contains, in first-seen order.
 
-import { escapeBrowserHtml } from "../html.js";
+import { escapeBrowserHtml } from "./html.js";
 import {
   radiusDeployBadgeKind,
   radiusDeployBadgeSvg,
