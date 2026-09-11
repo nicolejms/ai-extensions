@@ -517,6 +517,261 @@ describe("public host-neutral React API", () => {
       element.querySelector("[data-radius-details]")?.getAttribute("style")
     ).toMatch(/display:\s*none/);
   });
+
+  // The panel used to be raw DOM appended into the drawing area with one
+  // delegated listener. These cover the same behaviour now that React owns it.
+  async function openDetails(
+    element: HTMLElement,
+    name: string
+  ): Promise<HTMLElement> {
+    const owner = await within(element).findByRole("group", { name });
+    await userEvent.click(
+      within(owner).getByRole("button", { name: "Show details" })
+    );
+    const panel = element.querySelector("[data-radius-details]");
+    if (!(panel instanceof HTMLElement))
+      throw new Error("missing details panel");
+    return panel;
+  }
+
+  it("stays open inside itself, re-anchors to another card and closes on the pane", async () => {
+    const { root, element } = host();
+    root.render(
+      h(RadiusGraph, {
+        graph: { kind: "modeled", resources: RESOURCES },
+        options: { localSource: true },
+        callbacks: { onOpenSource: () => {} }
+      })
+    );
+    const panel = await openDetails(element, "web");
+    const anchoredToWeb = panel.style.top;
+    expect(panel.style.display).not.toBe("none");
+
+    await userEvent.click(
+      within(panel).getByRole("link", { name: /View source code/ })
+    );
+    expect(panel.style.display).not.toBe("none");
+
+    // A different card re-anchors the one panel rather than opening a second.
+    // A plain click, because user-event's synthetic mousedown reaches React
+    // Flow's d3 drag handlers, which need a real pointer sequence.
+    (await within(element).findByRole("group", { name: "db" })).click();
+    await waitFor(() => expect(panel.style.top).not.toBe(anchoredToWeb));
+    expect(element.querySelectorAll("[data-radius-details]")).toHaveLength(1);
+    expect(panel.style.display).not.toBe("none");
+
+    const pane = element.querySelector(".react-flow__pane");
+    if (!(pane instanceof HTMLElement)) throw new Error("missing graph pane");
+    pane.click();
+    await waitFor(() => expect(panel.style.display).toBe("none"));
+  });
+
+  it("routes a panel destination through the host instead of navigating", async () => {
+    const { root, element } = host();
+    const external: string[] = [];
+    root.render(
+      h(RadiusGraph, {
+        graph: {
+          kind: "modeled",
+          resources: [
+            { id: "web", name: "web", codeReference: "src/web.ts#L4" }
+          ]
+        },
+        options: { repoUrl: "https://github.com/example/app", branch: "main" },
+        callbacks: { onOpenExternal: (url) => external.push(url) }
+      })
+    );
+    const panel = await openDetails(element, "web");
+    const here = window.location.href;
+    await userEvent.click(
+      within(panel).getByRole("link", { name: /View source code/ })
+    );
+    expect(external).toEqual([
+      "https://github.com/example/app/blob/main/src/web.ts#L4"
+    ]);
+    expect(window.location.href).toBe(here);
+  });
+
+  it("leaves panel rows natively navigable for a host with no open capability", async () => {
+    const { root, element } = host();
+    root.render(
+      h(RadiusGraph, {
+        graph: {
+          kind: "modeled",
+          resources: [
+            { id: "web", name: "web", codeReference: "src/web.ts#L4" }
+          ]
+        },
+        options: {
+          repoUrl: "https://github.com/example/app",
+          branch: "main",
+          localSource: true
+        }
+      })
+    );
+    const panel = await openDetails(element, "web");
+    const rows = within(panel).getAllByRole("link");
+    // Both rows keep a real href, and nothing cancels the default action.
+    expect(rows[0].getAttribute("href")).toBe(
+      "https://github.com/example/app/blob/main/src/web.ts#L4"
+    );
+    for (const row of rows) {
+      let prevented = true;
+      row.addEventListener("click", (event) => {
+        prevented = event.defaultPrevented;
+        event.preventDefault();
+      });
+      await userEvent.click(row);
+      expect(prevented).toBe(false);
+    }
+    expect(panel.style.display).not.toBe("none");
+
+    // The same holds for a remote graph, whose rows navigate outward.
+    root.render(
+      h(RadiusGraph, {
+        graph: {
+          kind: "modeled",
+          resources: [
+            { id: "api", name: "api", codeReference: "src/api.ts#L4" }
+          ]
+        },
+        options: { repoUrl: "https://github.com/example/app", branch: "main" }
+      })
+    );
+    const remote = await openDetails(element, "api");
+    const external = within(remote).getByRole("link", {
+      name: /View source code/
+    });
+    let externalPrevented = true;
+    external.addEventListener("click", (event) => {
+      externalPrevented = event.defaultPrevented;
+      event.preventDefault();
+    });
+    await userEvent.click(external);
+    expect(externalPrevented).toBe(false);
+  });
+
+  it("renders a failure message as text and says when a node has no links", async () => {
+    const { root, element } = host();
+    const message = "<script>alert(1)</script> quota exceeded";
+    root.render(
+      h(RadiusGraph, {
+        graph: {
+          kind: "deployed-projection",
+          resources: [
+            {
+              id: "web",
+              name: "web",
+              deployStatus: "failed",
+              deployMessage: message
+            }
+          ]
+        }
+      })
+    );
+    const failure = await openDetails(element, "web");
+    expect(failure.querySelector("script")).toBeNull();
+    expect(failure.textContent).toContain(message);
+    expect(failure.firstElementChild?.getAttribute("style")).toContain(
+      "--rad-danger"
+    );
+
+    // A message that is not a failure reads as ordinary secondary text.
+    root.render(
+      h(RadiusGraph, {
+        graph: {
+          kind: "deployed-projection",
+          resources: [
+            {
+              id: "api",
+              name: "api",
+              deployStatus: "succeeded",
+              deployMessage: "Deployment complete"
+            }
+          ]
+        }
+      })
+    );
+    const succeeded = await openDetails(element, "api");
+    expect(succeeded.firstElementChild?.getAttribute("style")).toContain(
+      "--rad-text-secondary"
+    );
+
+    root.render(
+      h(RadiusGraph, {
+        graph: { kind: "modeled", resources: [{ id: "bare", name: "bare" }] }
+      })
+    );
+    const empty = await openDetails(element, "bare");
+    expect(empty.textContent).toBe("No links available.");
+  });
+
+  it("shows an unusable destination inert and a portal row without its URL", async () => {
+    const { root, element } = host();
+    root.render(
+      h(RadiusGraph, {
+        graph: {
+          kind: "modeled",
+          resources: [
+            {
+              id: "web",
+              name: "web",
+              codeReference: "src/web.ts#L4",
+              portalUrl: "https://portal.test/resource"
+            }
+          ]
+        },
+        options: { repoUrl: "javascript:alert(1)", branch: "main" }
+      })
+    );
+    const panel = await openDetails(element, "web");
+    expect(
+      within(panel).getByText("View source code").closest("[aria-disabled]")
+    ).toBeTruthy();
+    expect(
+      within(panel).queryByRole("link", { name: /View source code/ })
+    ).toBeNull();
+    const portal = within(panel).getByRole("link", { name: /View in portal/ });
+    expect(portal.getAttribute("href")).toBe("https://portal.test/resource");
+    // A portal row shows no subtitle, so the raw URL never appears as text.
+    expect(panel.textContent).not.toContain("https://portal.test/resource");
+  });
+
+  it("re-anchors an open panel when a relayout moves its card and closes with the node", async () => {
+    const { root, element } = host();
+    const unconnected = [
+      { id: "app/web", name: "web" },
+      { id: "app/db", name: "db" }
+    ];
+    root.render(
+      h(RadiusGraph, { graph: { kind: "modeled", resources: unconnected } })
+    );
+    const panel = await openDetails(element, "db");
+    const before = panel.style.top;
+
+    root.render(
+      h(RadiusGraph, {
+        graph: {
+          kind: "modeled",
+          resources: [
+            { ...unconnected[0], connections: [{ id: "app/db" }] },
+            unconnected[1]
+          ]
+        }
+      })
+    );
+    // Same node identities, so the panel stays open and follows its card down
+    // to the rank the edge put it on.
+    await waitFor(() => expect(panel.style.top).not.toBe(before));
+    expect(panel.style.display).not.toBe("none");
+
+    root.render(
+      h(RadiusGraph, {
+        graph: { kind: "modeled", resources: [unconnected[0]] }
+      })
+    );
+    await waitFor(() => expect(panel.style.display).toBe("none"));
+  });
 });
 async function card(name: string): Promise<HTMLElement> {
   return screen.findByRole("group", { name });

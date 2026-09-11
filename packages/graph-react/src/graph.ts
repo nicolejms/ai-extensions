@@ -4,9 +4,9 @@ import {
   useCallback,
   useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
-  useRef
+  useRef,
+  useState
 } from "react";
 import ReactFlow, {
   Background,
@@ -15,7 +15,13 @@ import ReactFlow, {
   useNodesState
 } from "reactflow";
 import dagre from "dagre";
-import type { CSSProperties, ReactElement, ReactNode } from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent,
+  MouseEvent,
+  ReactElement,
+  ReactNode
+} from "react";
 import type { ReactFlowInstance } from "reactflow";
 import type {
   GraphResource,
@@ -24,8 +30,14 @@ import type {
 import { graphContextKey } from "@radius-project/core/graph";
 import { buildGraph, resolveGraphSettings } from "./build.js";
 import type { GraphNodeData, GraphOptions, GraphSettings } from "./build.js";
-import { createDetailsPanel } from "./details.js";
-import type { DetailsPanel } from "./details.js";
+import {
+  anchorPosition,
+  buildDetailRows,
+  closesDetails,
+  focusReturnTarget
+} from "./details.js";
+import type { FocusTarget } from "./details.js";
+import { DetailsOverlay } from "./details-panel.js";
 import { layoutGraph } from "./layout.js";
 import {
   buildCategoryLegendHtml,
@@ -70,6 +82,13 @@ const FORWARDED_CALLBACKS = [
   "onNavigate"
 ] as const satisfies readonly (keyof GraphCallbacks)[];
 
+interface OpenDetails {
+  id: string;
+  card: HTMLElement;
+  left: number;
+  top: number;
+}
+
 function GraphContent({
   graph,
   options = EMPTY_OPTIONS,
@@ -90,6 +109,7 @@ function GraphContent({
       }),
     [optionsKey, graph.kind]
   );
+  const enablePopup = settings.enablePopup;
   const built = useMemo(() => {
     const resources: GraphResource[] = graph.resources.map((resource) => ({
       ...resource,
@@ -105,8 +125,16 @@ function GraphContent({
   const [edges, setEdges, onEdgesChange] = useEdgesState(built.edges);
   const flowRef = useRef<ReactFlowInstance | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
-  const panelRef = useRef<DetailsPanel<HTMLElement> | null>(null);
   const panelId = useId();
+  // Which node's details are open, the card they are anchored to, and where
+  // that put them. React owns the panel, so this is ordinary component state
+  // rather than a handle on a detached element.
+  const [details, setDetails] = useState<OpenDetails | null>(null);
+  // Event handlers must stay referentially stable to keep the memoized node
+  // context intact, so they read the open panel through a mirror of the state
+  // instead of closing over it.
+  const detailsRef = useRef<OpenDetails | null>(null);
+  const restoreFocusRef = useRef<FocusTarget | null>(null);
   const callbacksRef = useRef(callbacks);
   callbacksRef.current = callbacks;
   // An inline callbacks object changes identity on every host render. Depending
@@ -150,67 +178,93 @@ function GraphContent({
     },
     []
   );
+  const applyDetails = useCallback((next: OpenDetails | null) => {
+    detailsRef.current = next;
+    setDetails(next);
+  }, []);
+  const closeDetails = useCallback(() => {
+    if (!detailsRef.current) return;
+    applyDetails(null);
+    // Return focus where it was before the panel took it, so keyboard users
+    // are not dropped at the top of the document.
+    const restore = restoreFocusRef.current;
+    restoreFocusRef.current = null;
+    restore?.focus();
+  }, [applyDetails]);
+
   useEffect(() => {
     setNodes(built.nodes);
     setEdges(built.edges);
-    panelRef.current?.refresh(built.dataById);
+    // The panel reads its rows from the newest build, so refreshed data shows
+    // without reopening. A node that disappeared takes its panel with it.
+    const open = detailsRef.current;
+    if (open && !built.dataById[open.id]) closeDetails();
     if (signature !== previousSignature.current) {
       previousSignature.current = signature;
       scheduleFit();
-      panelRef.current?.close();
+      closeDetails();
     }
-  }, [built, signature, scheduleFit, setNodes, setEdges]);
+  }, [built, signature, scheduleFit, setNodes, setEdges, closeDetails]);
 
-  useLayoutEffect(() => {
-    const container = viewportRef.current;
-    if (!container || !settings.enablePopup) return;
-    const doc = container.ownerDocument;
-    const panel = createDetailsPanel<HTMLElement>(
-      {
-        dom: { createElement: (tag) => doc.createElement(tag) },
-        focus: {
-          active: () =>
-            doc.activeElement instanceof HTMLElement ? doc.activeElement : null,
-          focus(element) {
-            element?.focus();
-            return doc.activeElement === element;
-          }
-        }
-      },
-      container,
-      settings,
-      {
-        openExternal: stableCallbacks.onOpenExternal,
-        openLocalSource:
-          stableCallbacks.onOpenSource ?
-            (path, line, fallbackUrl) =>
-              stableCallbacks.onOpenSource?.({ path, line, fallbackUrl })
-          : undefined
-      },
-      `node-popup-${panelId}`
-    );
-    panelRef.current = panel;
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") panel.close();
-    };
-    container.addEventListener("keydown", close);
-    return () => {
-      container.removeEventListener("keydown", close);
-      panel.destroy();
-      panelRef.current = null;
-    };
-  }, [settings, stableCallbacks, panelId]);
+  // Re-anchor an open panel once the cards it points at have been laid out
+  // again, so a relayout or a drag does not leave it behind.
+  useEffect(() => {
+    const open = detailsRef.current;
+    if (!open) return;
+    const moved = anchorPosition(viewportRef.current, open.card);
+    if (moved.left !== open.left || moved.top !== open.top) {
+      applyDetails({ ...open, ...moved });
+    }
+  }, [nodes, applyDetails]);
 
   const showDetails = useCallback(
     (node: GraphNodeData, card: HTMLElement, toggle: boolean) => {
       callbacksRef.current.onSelect?.(node);
-      const panel = panelRef.current;
-      if (!panel) return;
-      if (toggle) panel.toggle(node, card);
-      else panel.open(node, card);
-      callbacksRef.current.onDetails?.(node, panel.isOpen);
+      if (!enablePopup) return;
+      const open = detailsRef.current;
+      // Clicking the same card's "…" button again closes the panel; a
+      // different card re-anchors it.
+      if (toggle && open?.card === card) {
+        closeDetails();
+        callbacksRef.current.onDetails?.(node, false);
+        return;
+      }
+      if (!open) {
+        restoreFocusRef.current = focusReturnTarget(
+          card.ownerDocument.activeElement
+        );
+      }
+      applyDetails({
+        id: node.id,
+        card,
+        ...anchorPosition(viewportRef.current, card)
+      });
+      callbacksRef.current.onDetails?.(node, true);
     },
-    []
+    [applyDetails, closeDetails, enablePopup]
+  );
+
+  // Clicking the empty pane, the controls or the legend closes the panel.
+  // Clicking a card or the panel itself does not: those have their own
+  // handlers.
+  const onViewportClick = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (!detailsRef.current) return;
+      if (closesDetails(event.target)) closeDetails();
+    },
+    [closeDetails]
+  );
+  const onViewportKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "Escape") closeDetails();
+    },
+    [closeDetails]
+  );
+
+  const openData = details ? built.dataById[details.id] : undefined;
+  const rows = useMemo(
+    () => (openData ? buildDetailRows(settings, openData) : []),
+    [openData, settings]
   );
   const interaction = useMemo(
     () => ({ settings, callbacks: stableCallbacks, showDetails }),
@@ -246,7 +300,12 @@ function GraphContent({
     : null,
     h(
       "div",
-      { className: "radius-graph__viewport", ref: viewportRef },
+      {
+        className: "radius-graph__viewport",
+        ref: viewportRef,
+        onClick: onViewportClick,
+        onKeyDown: onViewportKeyDown
+      },
       built.nodes.length === 0 ?
         h(
           "div",
@@ -278,7 +337,22 @@ function GraphContent({
           },
           h(Background, { gap: 16, size: 1 }),
           h(Controls, { showInteractive: false })
-        )
+        ),
+      enablePopup ?
+        h(DetailsOverlay, {
+          id: `node-popup-${panelId}`,
+          rows,
+          open: openData !== undefined,
+          left: details?.left ?? 0,
+          top: details?.top ?? 0,
+          onOpenExternal: stableCallbacks.onOpenExternal,
+          onOpenLocalSource:
+            stableCallbacks.onOpenSource ?
+              (path, line, fallbackUrl) =>
+                stableCallbacks.onOpenSource?.({ path, line, fallbackUrl })
+            : undefined
+        })
+      : null
     )
   );
 }

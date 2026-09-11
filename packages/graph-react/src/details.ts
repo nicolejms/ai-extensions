@@ -1,91 +1,97 @@
-// Canvas adapter — the node details panel (BU-06).
+// The node details panel's data model (BU-06).
 //
 // Clicking a node card opens a small panel of links beside it: the resource's
 // source file, the app definition, a live portal resource, and the producer's
-// status message when a deployment failed. The rows are built as escaped markup
-// by pure functions, and the panel itself owns exactly one delegated click
-// listener per container so re-rendering a graph can never stack handlers.
+// status message when a deployment failed. This module decides *which* rows a
+// node offers and where the panel is anchored. It is deliberately free of
+// React, markup and the DOM: a row is a plain description, and `DetailsOverlay`
+// in `details-panel.ts` is the single place that turns one into elements.
+//
+// Rows carry raw text, never markup. Escaping belongs to the renderer, so a
+// resource name from a provider cannot become markup no matter how it is used.
 
-import { escapeBrowserHtml } from "./html.js";
 import { safeExternalUrl } from "./external-url.js";
 import { buildSourceUrl, githubSourceReferenceUrl } from "./model.js";
 import { isLocalSourceNode } from "./build.js";
-import type { DetailsContext, GraphElement as DomElement } from "./ports.js";
 import type { GraphNodeData, GraphSettings } from "./build.js";
 
-// Monochrome octicon glyphs (currentColor) so links match the flat white-card
-// node styling instead of a coloured emoji.
-export const ICON_DEF =
-  '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="flex:none;"><path d="M2 4a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 4Zm0 4a.75.75 0 0 1 .75-.75h10.5a.75.75 0 0 1 0 1.5H2.75A.75.75 0 0 1 2 8Zm.75 3.25a.75.75 0 0 0 0 1.5h10.5a.75.75 0 0 0 0-1.5H2.75Z"></path></svg>';
-export const ICON_LINK =
-  '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="flex:none;"><path d="M3.75 2h3.5a.75.75 0 0 1 0 1.5h-3.5a.25.25 0 0 0-.25.25v8.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-3.5a.75.75 0 0 1 1.5 0v3.5A1.75 1.75 0 0 1 12.25 14h-8.5A1.75 1.75 0 0 1 2 12.25v-8.5C2 2.784 2.784 2 3.75 2Zm6.854-1h4.146a.25.25 0 0 1 .25.25v4.146a.25.25 0 0 1-.427.177L13.03 4.03 9.28 7.78a.751.751 0 0 1-1.06-1.06l3.75-3.75-1.543-1.543A.25.25 0 0 1 10.604 1Z"></path></svg>';
-export const ICON_SRC =
-  '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" style="flex:none;"><path d="m11.28 3.22 4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L13.94 8l-3.72-3.72a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215Zm-6.56 0a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L2.06 8l3.72 3.72a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L.47 8.53a.75.75 0 0 1 0-1.06Z"></path></svg>';
+/** Which monochrome octicon a link row leads with. */
+export type DetailIcon = "definition" | "link" | "source";
 
-export const PANEL_ID = "node-popup";
-export const PANEL_STYLE =
-  "display:none; position:absolute; z-index:1000; background:var(--rad-surface); color:var(--rad-text); border:1px solid var(--rad-stroke); border-radius:8px; padding:6px 8px; box-shadow:0 4px 12px var(--rad-shadow); font-size:13px; min-width:220px; max-width:380px; font-family:var(--rad-font);";
-
-const SUBTITLE_STYLE =
-  "color:var(--rad-text-tertiary); font-size:11px; margin-top:2px; margin-left:20px; word-break:break-all;";
-const LINK_STYLE =
-  "color:var(--rad-link); text-decoration:none; font-weight:500; display:flex; align-items:center; gap:6px; font-size:13px;";
-
-// Every external row built here, including source, app-definition, portal, and
-// cloud-output links, carries delegated metadata so the Canvas host opens it.
-// The target URL is optionally shown as a muted subtitle beneath.
-export function linkRow(
-  iconSvg: string,
-  label: string,
-  href: string,
-  showUrl: boolean
-): string {
-  const safeHref = safeExternalUrl(href);
-  if (!safeHref) {
-    return (
-      '<div style="padding:6px 4px;">' +
-      `<span aria-disabled="true" style="${LINK_STYLE}">${iconSvg}<span>${escapeBrowserHtml(label)}</span></span></div>`
-    );
-  }
-  const sub =
-    showUrl ?
-      `<div style="${SUBTITLE_STYLE}">${escapeBrowserHtml(safeHref)}</div>`
-    : "";
-  return (
-    '<div style="padding:6px 4px;">' +
-    `<a href="${escapeBrowserHtml(safeHref)}" data-external-url="${escapeBrowserHtml(safeHref)}" target="_blank" rel="noopener noreferrer" style="${LINK_STYLE}">` +
-    iconSvg +
-    `<span>${escapeBrowserHtml(label)}</span></a>${sub}</div>`
-  );
-}
+export type DetailRow =
+  /** The resource's name and type, shown for a live graph. */
+  | { readonly kind: "summary"; readonly name: string; readonly type: string }
+  /** The live provisioning state reported by the control plane. */
+  | { readonly kind: "status"; readonly state: string }
+  /** The producer's message for this resource, leading on a failure. */
+  | {
+      readonly kind: "message";
+      readonly text: string;
+      readonly failure: boolean;
+    }
+  /** A destination outside the app, opened through the host when it offers to. */
+  | {
+      readonly kind: "external";
+      readonly icon: DetailIcon;
+      readonly label: string;
+      readonly href: string;
+      readonly showUrl: boolean;
+    }
+  /** A destination that failed URL validation: shown, but not actionable. */
+  | {
+      readonly kind: "inert";
+      readonly icon: DetailIcon;
+      readonly label: string;
+    }
+  /** A file in the host's checkout, with a remote URL to fall back to. */
+  | {
+      readonly kind: "local";
+      readonly icon: DetailIcon;
+      readonly label: string;
+      readonly path: string;
+      readonly line: number;
+      readonly fallbackUrl: string;
+    }
+  /** Stands in for an empty panel so it never opens blank. */
+  | { readonly kind: "empty" };
 
 // Re-exported so this panel's existing importers keep one import site while the
 // deploy chip, which cannot pull in the graph modules this file depends on,
 // shares the same definition.
 export { safeExternalUrl };
 
-// A local link row: same look as linkRow, but opens an on-disk worktree file in
-// the editor canvas instead of navigating. The repo-relative path/line and a
-// GitHub fallback URL ride on data attributes; the container click delegation
-// reads them and opens the local file, falling back to the GitHub URL when the
-// file is not on this checkout. The fallback URL is also the anchor href so the
-// row stays a real link (copyable, right-clickable).
-export function localLinkRow(
-  iconSvg: string,
+// A destination is validated once, here. A row that survives validation is
+// always safe to render as a link, and one that does not is rendered inert
+// rather than dropped, so the panel still says what it could not offer.
+function externalRow(
+  icon: DetailIcon,
   label: string,
-  relPath: string,
+  href: string,
+  showUrl: boolean
+): DetailRow {
+  const safeHref = safeExternalUrl(href);
+  if (!safeHref) return { kind: "inert", icon, label };
+  return { kind: "external", icon, label, href: safeHref, showUrl };
+}
+
+// A local row opens an on-disk file in the host instead of navigating. The
+// fallback URL is validated the same way, because it is also the anchor's href
+// and is used when the file is not on this checkout.
+function localRow(
+  icon: DetailIcon,
+  label: string,
+  path: string,
   line: number,
   fallbackUrl: string
-): string {
-  const safeFallback = safeExternalUrl(fallbackUrl);
-  const subText = escapeBrowserHtml(relPath) + (line ? ":" + line : "");
-  const sub = `<div style="${SUBTITLE_STYLE}">${subText}</div>`;
-  return (
-    '<div style="padding:6px 4px;">' +
-    `<a href="${escapeBrowserHtml(safeFallback || "#")}" data-local-src="${escapeBrowserHtml(relPath)}" data-local-line="${line || 0}" data-fallback-url="${escapeBrowserHtml(safeFallback)}" style="${LINK_STYLE}">` +
-    iconSvg +
-    `<span>${escapeBrowserHtml(label)}</span></a>${sub}</div>`
-  );
+): DetailRow {
+  return {
+    kind: "local",
+    icon,
+    label,
+    path,
+    line,
+    fallbackUrl: safeExternalUrl(fallbackUrl)
+  };
 }
 
 export function azurePortalUrl(armId: string): string {
@@ -100,7 +106,7 @@ function definitionUrl(settings: GraphSettings, data: GraphNodeData): string {
   );
 }
 
-function cloudRows(data: GraphNodeData): string[] {
+function cloudRows(data: GraphNodeData): DetailRow[] {
   if (!data.cloudResources) return [];
   let parsed: unknown;
   try {
@@ -111,7 +117,7 @@ function cloudRows(data: GraphNodeData): string[] {
     return [];
   }
   if (!Array.isArray(parsed)) return [];
-  const rows: string[] = [];
+  const rows: DetailRow[] = [];
   for (const entry of parsed) {
     if (typeof entry !== "object" || entry === null) continue;
     const record = entry as {
@@ -131,8 +137,8 @@ function cloudRows(data: GraphNodeData): string[] {
     const label =
       name || (type ? type.split("/").pop() || "" : "") || "resource";
     rows.push(
-      linkRow(
-        ICON_LINK,
+      externalRow(
+        "link",
         label + " in Azure portal",
         producerUrl || azurePortalUrl(id),
         false
@@ -148,23 +154,23 @@ function cloudRows(data: GraphNodeData): string[] {
 export function buildDetailRows(
   settings: GraphSettings,
   data: GraphNodeData
-): string[] {
-  const rows: string[] = [];
+): DetailRow[] {
+  const rows: DetailRow[] = [];
   if (settings.liveMode) {
-    rows.push(
-      `<dl><dt>Resource</dt><dd>${escapeBrowserHtml(data.nodeName)}</dd><dt>Type</dt><dd>${escapeBrowserHtml(data.resourceType)}</dd></dl>`
-    );
+    rows.push({
+      kind: "summary",
+      name: data.nodeName,
+      type: data.resourceType
+    });
     if (data.provisioningState !== undefined) {
-      rows.push(
-        `<div>Provisioning status: ${escapeBrowserHtml(data.provisioningState)}</div>`
-      );
+      rows.push({ kind: "status", state: data.provisioningState });
     }
   }
   if (isLocalSourceNode(settings, data)) {
     if (data.srcPath) {
       rows.push(
-        localLinkRow(
-          ICON_SRC,
+        localRow(
+          "source",
           "View source code",
           data.srcPath,
           data.srcLine,
@@ -172,12 +178,14 @@ export function buildDetailRows(
         )
       );
     } else if (githubSourceReferenceUrl(data.codeRef) && data.sourceUrl) {
-      rows.push(linkRow(ICON_SRC, "View source code", data.sourceUrl, true));
+      rows.push(
+        externalRow("source", "View source code", data.sourceUrl, true)
+      );
     }
     if (data.defFile) {
       rows.push(
-        localLinkRow(
-          ICON_DEF,
+        localRow(
+          "definition",
           "View app definition",
           data.defFile,
           data.defLine,
@@ -187,12 +195,14 @@ export function buildDetailRows(
     }
   } else {
     if (data.sourceUrl) {
-      rows.push(linkRow(ICON_SRC, "View source code", data.sourceUrl, true));
+      rows.push(
+        externalRow("source", "View source code", data.sourceUrl, true)
+      );
     }
     if (settings.repoUrl && data.defFile) {
       rows.push(
-        linkRow(
-          ICON_DEF,
+        externalRow(
+          "definition",
           "View app definition",
           definitionUrl(settings, data),
           true
@@ -201,25 +211,21 @@ export function buildDetailRows(
     }
   }
   // The producer's status message for this resource leads when a deploy failed:
-  // the reason is what the user opened the panel for. Rendered as escaped text,
-  // never as markup.
+  // the reason is what the user opened the panel for.
   if (data.deployMessage) {
-    const failure = data.deployStatus === "failed";
-    rows.unshift(
-      '<div style="padding:6px 4px; font-size:12px; line-height:1.5; color:' +
-        (failure ? "var(--rad-danger,#cf222e)" : "var(--rad-text-secondary)") +
-        '; border-bottom:1px solid var(--rad-stroke,#d1d9e0); margin-bottom:4px; word-break:break-word;">' +
-        escapeBrowserHtml(data.deployMessage) +
-        "</div>"
-    );
+    rows.unshift({
+      kind: "message",
+      text: data.deployMessage,
+      failure: data.deployStatus === "failed"
+    });
   }
   if (safeExternalUrl(data.portalUrl)) {
-    rows.push(linkRow(ICON_LINK, "View in portal", data.portalUrl, false));
+    rows.push(externalRow("link", "View in portal", data.portalUrl, false));
   }
   if (data.cloudId) {
     rows.push(
-      linkRow(
-        ICON_LINK,
+      externalRow(
+        "link",
         "View in Azure portal",
         azurePortalUrl(data.cloudId),
         false
@@ -227,12 +233,35 @@ export function buildDetailRows(
     );
   }
   rows.push(...cloudRows(data));
-  if (rows.length === 0) {
-    rows.push(
-      '<div style="padding:6px 4px; color:var(--rad-text-tertiary); font-size:12px;">No links available.</div>'
-    );
-  }
+  if (rows.length === 0) rows.push({ kind: "empty" });
   return rows;
+}
+
+/** Anything the panel can hand focus back to when it closes. */
+export interface FocusTarget {
+  focus(): void;
+}
+
+// Duck-typed rather than checked against `HTMLElement` so this file stays free
+// of DOM globals, and so a document that reports nothing focused — or reports
+// something that cannot take focus — still closes the panel cleanly.
+export function focusReturnTarget(active: unknown): FocusTarget | null {
+  if (typeof active !== "object" || active === null) return null;
+  const focus = (active as { focus?: unknown }).focus;
+  return typeof focus === "function" ? (active as FocusTarget) : null;
+}
+
+/**
+ * Whether a click on `target` inside the drawing area dismisses the panel.
+ * Clicking the panel keeps it open, a card is that card's own business, and
+ * anything else — empty canvas, controls, legend — closes it.
+ */
+export function closesDetails(target: unknown): boolean {
+  if (typeof target !== "object" || target === null) return false;
+  const closest = (target as { closest?: unknown }).closest;
+  if (typeof closest !== "function") return false;
+  if (closest.call(target, "[data-radius-details]")) return false;
+  return !closest.call(target, ".rad-node[data-node-id]");
 }
 
 export interface ElementRect {
@@ -253,9 +282,9 @@ function isRect(value: unknown): value is ElementRect {
   );
 }
 
-// Layout measurement is the one capability the shared DOM port deliberately
-// does not carry, so it is read here through a guard: an element that cannot be
-// measured positions the panel at the container's origin instead of throwing.
+// Layout measurement is read through a guard rather than a DOM type, so a
+// element that cannot be measured positions the panel at the container's origin
+// instead of throwing.
 export function rectOf(element: unknown): ElementRect | null {
   if (typeof element !== "object" || element === null) return null;
   const measure = (element as { getBoundingClientRect?: unknown })
@@ -287,145 +316,15 @@ export function panelPosition(
   return { left: Math.max(0, left), top: Math.max(0, top) };
 }
 
-export interface DetailsPanel<Element extends DomElement = DomElement> {
-  open(data: GraphNodeData, card: Element): void;
-  close(): void;
-  toggle(data: GraphNodeData, card: Element): void;
-  refresh(dataById: Readonly<Record<string, GraphNodeData>>): void;
-  readonly isOpen: boolean;
-  destroy(): void;
-}
-
-export interface DetailsPanelDeps {
-  // Opens a validated external URL through the Canvas host rather than relying
-  // on native navigation inside the webview.
-  openExternal?(url: string): void;
-  // Opens a repo-relative worktree file in the editor canvas, falling back to
-  // the file's remote URL. Supplied by the renderer so the panel does not own a
-  // network policy of its own.
-  openLocalSource?(relPath: string, line: number, fallbackUrl: string): void;
-}
-
-// Wire a details panel to a graph container. Exactly one click listener is
-// registered; destroy() removes it, so a second render on the same container
-// replaces rather than stacks handlers.
-export function createDetailsPanel<Element extends DomElement>(
-  context: DetailsContext<Element>,
-  container: Element & { appendChild(child: Element): unknown },
-  settings: GraphSettings,
-  deps: DetailsPanelDeps,
-  panelId = PANEL_ID
-): DetailsPanel<Element> {
-  const panel = context.dom.createElement("div");
-  panel.id = panelId;
-  panel.setAttribute("data-radius-details", "");
-  panel.setAttribute("style", PANEL_STYLE);
-  panel.style.display = "none";
-  container.appendChild(panel);
-
-  let openCard: Element | null = null;
-  let openNodeId: string | null = null;
-  let restoreFocusTo: Element | null = null;
-
-  function open(data: GraphNodeData, card: Element): void {
-    if (!data) return;
-    panel.innerHTML = buildDetailRows(settings, data).join("");
-    const containerRect = rectOf(container);
-    const cardRect = rectOf(card);
-    const position =
-      containerRect && cardRect ?
-        panelPosition(containerRect, cardRect)
-      : { left: 0, top: 0 };
-    panel.style.left = position.left + "px";
-    panel.style.top = position.top + "px";
-    panel.style.display = "";
-    if (openCard === null) {
-      restoreFocusTo = context.focus.active();
-    }
-    openCard = card;
-    openNodeId = data.id;
-  }
-
-  function close(): void {
-    panel.style.display = "none";
-    openCard = null;
-    openNodeId = null;
-    // Return focus where it was before the panel took it, so keyboard users are
-    // not dropped at the top of the document.
-    const restore = restoreFocusTo;
-    restoreFocusTo = null;
-    context.focus.focus(restore);
-  }
-
-  // Delegate clicks from the node cards. Every validated external row is routed
-  // through the Canvas host; local source rows open the editor canvas. Clicking
-  // the empty pane closes the panel.
-  const onClick = (event: {
-    target?: unknown;
-    preventDefault(): void;
-  }): void => {
-    const target = event.target;
-    const closest =
-      typeof target === "object" && target !== null ?
-        (target as { closest?: unknown }).closest
-      : undefined;
-    if (typeof closest !== "function") return;
-    const find = (selector: string): unknown => closest.call(target, selector);
-    const localEl = find("[data-local-src]");
-    if (localEl !== null && localEl !== undefined) {
-      if (!deps.openLocalSource) return;
-      event.preventDefault();
-      const element = localEl as DomElement;
-      deps.openLocalSource(
-        element.getAttribute("data-local-src") ?? "",
-        parseInt(element.getAttribute("data-local-line") ?? "", 10) || 0,
-        element.getAttribute("data-fallback-url") ?? ""
-      );
-      return;
-    }
-    const externalEl = find("[data-external-url]");
-    if (externalEl !== null && externalEl !== undefined) {
-      if (!deps.openExternal) return;
-      event.preventDefault();
-      // linkRow emits this attribute only for a validated URL. Validate again
-      // because a caller or browser extension can still mutate the DOM.
-      const url = safeExternalUrl(
-        (externalEl as DomElement).getAttribute("data-external-url") ?? ""
-      );
-      if (url) deps.openExternal(url);
-      return;
-    }
-    if (find("[data-radius-details]")) return;
-    if (find(".rad-node[data-node-id]")) return;
-    close();
-  };
-
-  container.addEventListener("click", onClick);
-
-  return {
-    open,
-    close,
-    refresh(dataById) {
-      if (openCard === null || openNodeId === null) return;
-      const current = dataById[openNodeId];
-      if (current) open(current, openCard);
-      else close();
-    },
-    toggle(data, card) {
-      // Clicking the same card's "…" button again closes the panel; a different
-      // card re-anchors it.
-      if (panel.style.display !== "none" && openCard === card) close();
-      else open(data, card);
-    },
-    get isOpen() {
-      return panel.style.display !== "none";
-    },
-    destroy() {
-      container.removeEventListener("click", onClick);
-      panel.remove();
-      openCard = null;
-      openNodeId = null;
-      restoreFocusTo = null;
-    }
-  };
+// Where the panel sits for a card, in container coordinates. Anything that
+// cannot be measured yet anchors at the container origin.
+export function anchorPosition(
+  container: unknown,
+  card: unknown
+): PanelPosition {
+  const containerRect = rectOf(container);
+  const cardRect = rectOf(card);
+  return containerRect && cardRect ?
+      panelPosition(containerRect, cardRect)
+    : { left: 0, top: 0 };
 }

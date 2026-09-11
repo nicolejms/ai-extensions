@@ -65,7 +65,7 @@ Identical duplicate resource records are coalesced with a diagnostic. Conflictin
 
 The component fills its container. `.radius-graph` and its drawing area `.radius-graph__viewport` are a supported styling contract, so a host that owns the surrounding layout can size the drawing area itself; every other class under `.radius-graph` is internal and may change. The package deliberately ships no height of its own.
 
-Each component has independent layout, viewport, overlay, and timer state. Status-only updates preserve the viewport; changed node membership refits it. Details controls work by keyboard, Escape closes the overlay and restores focus, and teardown releases roots/listeners/timers. Missing finite layout positions produce a visible degraded-layout message and readable stacked cards.
+Each component has independent layout, viewport, overlay, and timer state. Status-only updates preserve the viewport; changed node membership refits it. Details controls work by keyboard, Escape closes the overlay and restores focus, and teardown releases roots/listeners/timers. The details overlay is a React-rendered element: it is anchored beside the card it describes, follows that card when a relayout or drag moves it, closes when its node leaves the data, and stays mounted while closed. Missing finite layout positions produce a visible degraded-layout message and readable stacked cards.
 
 Inline `options` and `callbacks` objects are safe. A host render that reallocates them keeps an open details overlay, its restorable focus, and any dragged node positions, and the newest callback closures still receive events. Replace `graph` only when the data itself changes, because new node membership intentionally refits the viewport.
 
