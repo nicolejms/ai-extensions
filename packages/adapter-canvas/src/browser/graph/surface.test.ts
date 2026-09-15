@@ -30,13 +30,19 @@ describe("Canvas graph mounting boundary", () => {
     expect(asGraphController({ update() {} })).toBeNull();
     expect(asGraphController({ destroy() {} })).toBeNull();
     let destroyed = 0;
-    const controller = asGraphController({
+    const next = {
       update: () => null,
       destroy: () => {
         destroyed++;
       }
+    };
+    const controller = asGraphController({
+      update: () => next,
+      destroy: () => {
+        destroyed++;
+      }
     });
-    expect(controller?.update([])).toBeNull();
+    expect(controller?.update([])?.update([])).toBeNull();
     controller?.destroy();
     expect(destroyed).toBe(1);
   });
@@ -61,22 +67,31 @@ describe("Canvas graph mounting boundary", () => {
       controller?.destroy();
       controller?.update(resources);
       expect(renderer.roots[0].unmounts).toBe(1);
+      expect(renderer.roots[0].host).toMatchObject({ removed: true });
       expect(renderer.roots[0].updates).toHaveLength(1);
     }
   );
-  it("isolates replacement and simultaneous roots from stale controllers", () => {
-    const { surface, renderer, browser } = setup();
-    browser.document.add(createFakeElement("other"));
-    const first = surface.render("graph-container", []);
-    surface.render("graph-container", []);
-    surface.render("other", null);
-    first?.destroy();
-    first?.update([{ id: "stale" }]);
-    expect(renderer.roots.map((root) => root.unmounts)).toEqual([1, 0, 0]);
-    surface.destroyAll();
-    surface.destroyAll();
-    expect(renderer.roots.map((root) => root.unmounts)).toEqual([1, 1, 1]);
-  });
+  it.each([
+    { state: "empty", resources: [] },
+    { state: "populated", resources: [{ id: "web", name: "web" }] }
+  ])(
+    "isolates replacement and simultaneous roots from stale $state controllers",
+    ({ resources }) => {
+      const { surface, renderer, browser } = setup();
+      browser.document.add(createFakeElement("other"));
+      const first = surface.render("graph-container", resources);
+      surface.render("graph-container", []);
+      surface.render("other", null);
+      expect(renderer.roots[2].props.graph.resources).toEqual([]);
+      first?.destroy();
+      expect(first?.update([{ id: "stale" }])).toBe(first);
+      expect(renderer.roots.map((root) => root.unmounts)).toEqual([1, 0, 0]);
+      expect(renderer.roots.flatMap((root) => root.updates)).toEqual([]);
+      surface.destroyAll();
+      surface.destroyAll();
+      expect(renderer.roots.map((root) => root.unmounts)).toEqual([1, 1, 1]);
+    }
+  );
   it("leaves absent page containers alone", () => {
     const { surface, renderer } = setup();
     expect(surface.render("absent", [])).toBeNull();
@@ -89,6 +104,7 @@ describe("Canvas graph mounting boundary", () => {
     surface.render("graph-container", []);
     surface.setLoading("graph-container");
     expect(container.innerHTML).toBe(GRAPH_LOADING_HTML);
+    expect(container.innerHTML).toContain('id="progress-steps"');
     expect(renderer.roots[0].unmounts).toBe(1);
     surface.render("graph-container", []);
     surface.setError("graph-container", "<script>bad</script>");
@@ -98,6 +114,8 @@ describe("Canvas graph mounting boundary", () => {
     expect(container.querySelector(".error")?.getAttribute("role")).toBe(
       "alert"
     );
+    expect(container.querySelector(".error")?.className).toBe("status error");
+    expect(container.innerHTML).toBe("");
     expect(renderer.roots[1].unmounts).toBe(1);
   });
   it.each([false, true])(
@@ -115,11 +133,48 @@ describe("Canvas graph mounting boundary", () => {
       expect(container.querySelector(".error")?.textContent).toBe(
         throws ? GRAPH_RENDER_ERROR : GRAPH_LIBRARY_ERROR
       );
+      expect(container.querySelector(".error")?.className).toBe("status error");
+      expect(container.querySelector("button")?.textContent).toBe(
+        "Reload graph"
+      );
+      expect(container.querySelector("button")?.getAttribute("type")).toBe(
+        "button"
+      );
       container.querySelector("button")?.dispatchEvent?.({ type: "click" });
       expect(browser.nav.reloads).toBe(1);
-      expect(browser.logger.errors).toHaveLength(throws ? 1 : 0);
+      expect(browser.logger.errors).toEqual(
+        throws ?
+          [
+            {
+              message: "Rendering the application graph failed.",
+              detail: expect.any(Error)
+            }
+          ]
+        : []
+      );
     }
   );
+  it("cleans an incomplete render record before retrying a DOM failure", () => {
+    const { surface, browser, renderer, container } = setup();
+    const createElement = browser.context.dom.createElement;
+    let fail = true;
+    browser.context.dom.createElement = (tagName) => {
+      if (fail) {
+        fail = false;
+        throw new Error("DOM unavailable");
+      }
+      return createElement(tagName);
+    };
+
+    expect(surface.render("graph-container", [{ id: "web" }])).toBeNull();
+    expect(container.querySelector(".error")?.textContent).toBe(
+      GRAPH_RENDER_ERROR
+    );
+    expect(surface.render("graph-container", [{ id: "web" }])).not.toBeNull();
+    expect(renderer.roots).toHaveLength(1);
+    surface.destroyAll();
+    expect(renderer.roots[0].unmounts).toBe(1);
+  });
   it("threads callbacks without introducing networking into graph-react", async () => {
     const { surface, renderer, browser } = setup();
     surface.render("graph-container", []);
@@ -136,18 +191,46 @@ describe("Canvas graph mounting boundary", () => {
     await flushPromises();
     expect(browser.net.calls[0]).toMatchObject({
       url: OPEN_SOURCE_PATH,
-      init: { body: JSON.stringify({ path: "src/web.ts", line: 3 }) }
+      init: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: "src/web.ts", line: 3 })
+      }
     });
     expect(browser.nav.reloads).toBe(1);
     expect(browser.external.opened).toEqual(["https://example.test/path"]);
   });
 
-  it.each(["http", "network"] as const)(
+  it.each([0, 4, 31])(
+    "posts source line %s with the complete local request contract",
+    async (line) => {
+      const { surface, browser } = setup();
+      browser.net.handle(OPEN_SOURCE_PATH, () => jsonResponse({ ok: true }));
+
+      surface.openLocalSource("src/web.ts", line, "https://github.test/x");
+      await flushPromises();
+
+      expect(browser.net.calls).toHaveLength(1);
+      expect(browser.net.calls[0]).toMatchObject({
+        url: OPEN_SOURCE_PATH,
+        init: {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: "src/web.ts", line })
+        }
+      });
+      expect(browser.external.opened).toEqual([]);
+    }
+  );
+
+  it.each(["http", "not-on-worktree", "network"] as const)(
     "falls back to safe remote source on a %s failure",
     async (failure) => {
       const { surface, browser } = setup();
       browser.net.handle(OPEN_SOURCE_PATH, () => {
         if (failure === "network") throw new Error("offline");
+        if (failure === "not-on-worktree")
+          return jsonResponse({ error: "NOT_ON_WORKTREE" }, false, 409);
         return jsonResponse({}, false, 404);
       });
       surface.openLocalSource("src/web.ts", 0, "https://example.test/fallback");
@@ -157,9 +240,21 @@ describe("Canvas graph mounting boundary", () => {
       ]);
       surface.openLocalSource("", 0, "https://example.test/no-local-source");
       expect(browser.net.calls).toHaveLength(1);
-      expect(browser.external.opened).toHaveLength(2);
+      expect(browser.external.opened).toEqual([
+        "https://example.test/fallback",
+        "https://example.test/no-local-source"
+      ]);
     }
   );
+
+  it("ignores empty and unsafe external URLs without making a request", () => {
+    const { surface, browser } = setup();
+    surface.openExternal("");
+    surface.openExternal("javascript:alert(1)");
+    surface.openLocalSource("", 0, "");
+    expect(browser.external.opened).toEqual([]);
+    expect(browser.net.calls).toEqual([]);
+  });
 
   it("does not act on callbacks from a replaced root or a late failed source request", async () => {
     const { surface, browser, renderer } = setup();
@@ -209,6 +304,8 @@ describe("Canvas graph mounting boundary", () => {
     surface.render("other", []);
     expect(() => surface.destroyAll()).toThrow(AggregateError);
     expect(renderer.roots.map((root) => root.unmounts)).toEqual([1, 1]);
+    for (const root of renderer.roots)
+      expect(root.host).toMatchObject({ removed: true });
     expect(() => surface.destroyAll()).not.toThrow();
   });
 });

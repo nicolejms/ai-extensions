@@ -79,18 +79,29 @@ export function layoutGraph(
       }
     }
     dagre.layout(graph);
+    let missingPosition = false;
+    let placedNodes = 0;
     for (const node of nodes) {
       const placed = graph.node(node.id);
-      if (placed && Number.isFinite(placed.x) && Number.isFinite(placed.y)) {
+      if (!placed) {
+        missingPosition = true;
+        continue;
+      }
+      if (Number.isFinite(placed.x) && Number.isFinite(placed.y)) {
         node.position = {
           x: placed.x - GRAPH_NODE_WIDTH / 2,
           y: placed.y - GRAPH_NODE_HEIGHT / 2
         };
+        placedNodes++;
       } else {
         throw new Error(`Missing finite layout position for ${node.id}`);
       }
     }
-    return null;
+    if (missingPosition && placedNodes === 0)
+      throw new Error("No layout positions were returned.");
+    return missingPosition ?
+        "Layout incomplete. Unplaced resources keep their previous positions."
+      : null;
   } catch {
     // A layout failure happens before dagre exposes usable placements. Stack the
     // whole graph so placeholder (0, 0) positions do not collapse every card.

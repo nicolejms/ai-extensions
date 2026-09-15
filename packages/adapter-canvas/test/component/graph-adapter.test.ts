@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { mountRadiusGraph } from "@radius-project/graph-react";
 import "@radius-project/graph-react/styles.css";
 import { installGraphEntry } from "../../src/browser/entries/graph.js";
-import { asGraphController } from "../../src/browser/graph/surface.js";
+import {
+  asGraphController,
+  createGraphSurface
+} from "../../src/browser/graph/surface.js";
 import { SHELL_STYLE_CSS } from "../../src/pages/shell-styles.js";
 import { createRealScope, jsonResponse } from "./support/real-scope.js";
 
@@ -14,6 +17,78 @@ afterEach(() => {
 });
 
 describe("Canvas entry with the canonical renderer in Chromium", () => {
+  it("repopulates an empty Canvas controller and removes its real host and details on destroy", async () => {
+    const real = createRealScope();
+    real.host.id = "graph-render-recovery";
+    real.host.style.width = "850px";
+    real.host.style.height = "650px";
+    const surface = createGraphSurface(real.context, () => mountRadiusGraph);
+    dispose.push(() => {
+      surface.destroyAll();
+      real.dispose();
+    });
+    const controller = surface.render(real.host.id, []);
+    await within(real.host).findByText("No resources in this application.");
+
+    expect(controller?.update([{ id: "web", name: "web" }])).toBe(controller);
+    await within(real.host).findByRole("group", { name: "web" });
+    expect(real.host.querySelector("[data-radius-details]")).not.toBeNull();
+    controller?.destroy();
+    expect(real.host.childElementCount).toBe(0);
+    expect(real.host.querySelector("[data-radius-details]")).toBeNull();
+    controller?.destroy();
+  });
+
+  it.each([
+    ["feature", null],
+    ["", "_blank"]
+  ] as const)(
+    "threads a workspace branch of %j through the mounted source link",
+    async (workspaceBranch, target) => {
+      const real = createRealScope({
+        route: () => {
+          throw new Error("Rendering the graph must not make network requests");
+        }
+      });
+      real.host.id = "graph-entry-source-target";
+      real.host.style.width = "850px";
+      real.host.style.height = "650px";
+      const teardown = installGraphEntry(real.scope, mountRadiusGraph);
+      dispose.push(() => {
+        teardown();
+        real.dispose();
+      });
+      const render: unknown = Reflect.get(real.scope, "radiusRenderGraph");
+      if (typeof render !== "function")
+        throw new Error("Canvas did not publish radiusRenderGraph");
+      const controller = render(
+        real.host.id,
+        [{ id: "app/web", name: "web", codeReference: "web.bicep#L3" }],
+        {
+          diffMode: true,
+          localSource: false,
+          repoUrl: "https://github.com/octo/app",
+          branch: "feature",
+          baseBranch: "main",
+          workspaceBranch
+        }
+      );
+      expect(asGraphController(controller)).not.toBeNull();
+      const card = await within(real.host).findByRole("group", { name: "web" });
+      const source = within(card).getByRole("link", {
+        name: /View source code/
+      });
+      expect(source.getAttribute("href")).toBe(
+        "https://github.com/octo/app/blob/feature/web.bicep#L3"
+      );
+      expect(source.getAttribute("target")).toBe(target);
+      if (target === "_blank") {
+        expect(source.getAttribute("rel")).toBe("noopener noreferrer");
+      }
+      expect(real.requests).toEqual([]);
+    }
+  );
+
   it.each([360, 900])(
     "preserves legend spacing and a 450px drawing area in a %ipx host",
     async (width) => {

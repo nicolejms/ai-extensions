@@ -7,6 +7,8 @@
 // renders them, and `graph.browser.test.ts` covers that rendering in Chromium.
 
 import { describe, it, expect } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
   anchorPosition,
   azurePortalUrl,
@@ -18,6 +20,7 @@ import {
   safeExternalUrl
 } from "./details.js";
 import { resolveGraphSettings } from "./build.js";
+import { DetailsOverlay } from "./details-panel.js";
 import type { GraphNodeData, GraphOptions } from "./build.js";
 
 function node(overrides: Partial<GraphNodeData> = {}): GraphNodeData {
@@ -53,6 +56,35 @@ function settings(options: GraphOptions = {}) {
 }
 
 describe("detail rows", () => {
+  it("renders inert and local labels as text and keeps an unlined local fallback", () => {
+    const html = renderToStaticMarkup(
+      createElement(DetailsOverlay, {
+        id: "details",
+        open: true,
+        left: 0,
+        top: 0,
+        rows: [
+          { kind: "inert", icon: "link", label: "<label>" },
+          {
+            kind: "local",
+            icon: "source",
+            label: "<source>",
+            path: "src/a.ts",
+            line: 0,
+            fallbackUrl: ""
+          }
+        ]
+      })
+    );
+    expect(html).toContain('aria-disabled="true"');
+    expect(html).toContain("&lt;label&gt;");
+    expect(html).toContain("&lt;source&gt;");
+    expect(html.match(/href=/g)).toHaveLength(1);
+    expect(html).toContain('href="#"');
+    expect(html).toContain(">src/a.ts</div>");
+    expect(html).not.toContain("src/a.ts:0");
+  });
+
   it("summarizes a live node and keeps an optional raw status", () => {
     const live = settings({ liveMode: true });
     const data = node({
@@ -80,6 +112,32 @@ describe("detail rows", () => {
     );
     expect(rows).toEqual([
       { kind: "inert", icon: "source", label: "View source code" }
+    ]);
+  });
+
+  it("clears unsafe local fallbacks without discarding the file or line", () => {
+    expect(
+      buildDetailRows(
+        settings({ localSource: true, repoUrl: "javascript:alert(1)" }),
+        node({ sourceUrl: "javascript:alert(1)", srcLine: 0 })
+      )
+    ).toEqual([
+      {
+        kind: "local",
+        icon: "source",
+        label: "View source code",
+        path: "src/web.ts",
+        line: 0,
+        fallbackUrl: ""
+      },
+      {
+        kind: "local",
+        icon: "definition",
+        label: "View app definition",
+        path: ".radius/app.bicep",
+        line: 12,
+        fallbackUrl: ""
+      }
     ]);
   });
 
@@ -463,6 +521,8 @@ describe("panel position", () => {
       })
     };
     expect(anchorPosition(container, card)).toEqual({ left: 328, top: 40 });
+    expect(anchorPosition({}, {})).toEqual({ left: 0, top: 0 });
+    expect(anchorPosition(container, {})).toEqual({ left: 0, top: 0 });
     expect(anchorPosition(null, card)).toEqual({ left: 0, top: 0 });
     expect(anchorPosition(container, null)).toEqual({ left: 0, top: 0 });
   });

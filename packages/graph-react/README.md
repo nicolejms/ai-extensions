@@ -65,7 +65,7 @@ Identical duplicate resource records are coalesced with a diagnostic. Conflictin
 
 The component fills its container. `.radius-graph` and its drawing area `.radius-graph__viewport` are a supported styling contract, so a host that owns the surrounding layout can size the drawing area itself; every other class under `.radius-graph` is internal and may change. The package deliberately ships no height of its own.
 
-Each component has independent layout, viewport, overlay, and timer state. Status-only updates preserve the viewport; changed node membership refits it. Details controls work by keyboard, Escape closes the overlay and restores focus, and teardown releases roots/listeners/timers. The details overlay is a React-rendered element: it is anchored beside the card it describes, follows that card when a relayout or drag moves it, closes when its node leaves the data, and stays mounted while closed. Missing finite layout positions produce a visible degraded-layout message and readable stacked cards.
+Each component has independent layout, viewport, overlay, and timer state. Status-only updates preserve the viewport; changed node membership refits it. Details controls work by keyboard, Escape closes the overlay and restores focus, and teardown releases roots/listeners/timers. The details overlay is a React-rendered element: it is anchored beside the card it describes, follows that card when a relayout or drag moves it, closes when its node leaves the data, and stays mounted while closed if the graph is non-empty. A partial layout preserves valid placements and the unplaced nodes' prior positions, with a visible diagnostic. A wholly missing, non-finite, or failed layout produces readable stacked cards and a degraded-layout message.
 
 Inline `options` and `callbacks` objects are safe. A host render that reallocates them keeps an open details overlay, its restorable focus, and any dragged node positions, and the newest callback closures still receive events. Replace `graph` only when the data itself changes, because new node membership intentionally refits the viewport.
 
@@ -80,6 +80,8 @@ The renderer and its existing pure/browser scenarios were extracted from `ai-ext
 The design inputs are `docs/design/2026-09-radius-backstage-plugin.md` and `docs/design/2026-09-dashboard-plugin-test-plan.md` from dashboard commit `fd90d938267ceab5935b037bc7dd1ff59831e8b5`. The live normalization implementation and local fixtures are independently authored from those contracts. Dashboard implementation/fixture code was not copied because its package/repository license discrepancy remains unresolved.
 
 ## Qualification gates
+
+`pnpm run coverage` and `pnpm run test:reliability` both discover the shared graph's Node and real Chromium suites alongside the Canvas host tests owned by each gate. The scheduled reliability workflow installs Chromium on each supported operating system. The shared package retains the original Canvas browser branch floor of 99.5%, with statements, functions, and lines pinned at 100%.
 
 Local package and component checks cannot substitute for the required dashboard-host gate. At the pinned dashboard revision, phases 0 and 3 are complete, phases 1 and 2 are in progress, and phase 4 onward has not started. GU-01 through GU-10 Tier A fixtures/invariants exist; that is not a frozen regression baseline.
 

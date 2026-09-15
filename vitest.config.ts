@@ -51,8 +51,7 @@ export default defineConfig({
           coverageBaseline.newlyExtracted.runtime,
         "packages/adapter-canvas/src/browser/**":
           coverageBaseline.newlyExtracted.browser,
-        "packages/graph-react/src/**":
-          coverageBaseline.newlyExtracted.graphReact
+        "packages/graph-react/src/**": coverageBaseline.packages["graph-react"]
       }
     }
   }

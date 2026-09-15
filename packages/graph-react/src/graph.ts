@@ -338,7 +338,7 @@ function GraphContent({
           h(Background, { gap: 16, size: 1 }),
           h(Controls, { showInteractive: false })
         ),
-      enablePopup ?
+      enablePopup && built.nodes.length > 0 ?
         h(DetailsOverlay, {
           id: `node-popup-${panelId}`,
           rows,

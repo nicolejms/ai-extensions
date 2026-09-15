@@ -5,7 +5,7 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import dagre from "dagre";
-import { page } from "vitest/browser";
+import { page, userEvent as browserUserEvent } from "vitest/browser";
 import { screen, waitFor, within } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 import { createElement as h, useState } from "react";
@@ -53,6 +53,7 @@ afterEach(() => {
 function mount(
   options: {
     localSource?: boolean;
+    repoUrl?: string;
     deployMode?: boolean;
     showLegend?: boolean;
     diffMode?: boolean;
@@ -68,7 +69,7 @@ function mount(
     diffMode: options.diffMode,
     baseBranch: options.baseBranch,
     workspaceBranch: options.workspaceBranch,
-    repoUrl: "https://github.test/o/r",
+    repoUrl: options.repoUrl ?? "https://github.test/o/r",
     branch: "feature-branch"
   });
   const host = document.createElement("div");
@@ -150,6 +151,11 @@ describe("public host-neutral React API", () => {
   it("surfaces rendering failures, supports host retry and recovers on new graph identity", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const { root, element } = host();
+    root.render(
+      h(RadiusGraph, { graph: { kind: "modeled", resources: RESOURCES } })
+    );
+    await within(element).findByRole("group", { name: "web" });
+    expect(within(element).queryByRole("alert")).toBeNull();
     const failed = {
       kind: "live" as const,
       context: { ...context, applicationId: "invalid" },
@@ -447,10 +453,12 @@ describe("public host-neutral React API", () => {
 
   it("does not expose details controls when the host disables that capability", async () => {
     const { root, element } = host();
+    const onDetails = vi.fn();
     root.render(
       h(RadiusGraph, {
         graph: normalizeLiveGraph({ resources: [resource] }, context),
-        options: { enablePopup: false }
+        options: { enablePopup: false },
+        callbacks: { onDetails }
       })
     );
     await within(element).findByRole("group", { name: "live-web" });
@@ -460,6 +468,107 @@ describe("public host-neutral React API", () => {
     expect(element.querySelector("[data-radius-details]")).toBeNull();
     await page.getByRole("group", { name: "live-web", exact: true }).click();
     expect(element.querySelector("[data-radius-details]")).toBeNull();
+    expect(onDetails).not.toHaveBeenCalled();
+  });
+
+  it("replaces graph content without accumulating drawing areas, panels or legends", async () => {
+    const { root, element } = host();
+    root.render(
+      h(RadiusGraph, {
+        graph: { kind: "modeled", resources: RESOURCES },
+        options: { showLegend: true }
+      })
+    );
+    await within(element).findByRole("group", { name: "web" });
+    const section = within(element).getByRole("region");
+    const viewport = element.querySelector(".radius-graph__viewport");
+    const flow = element.querySelector(".react-flow");
+    const panel = element.querySelector("[data-radius-details]");
+    for (const showLegend of [true, false, true]) {
+      root.render(
+        h(RadiusGraph, {
+          graph: {
+            kind: "modeled",
+            resources: [
+              { id: "cache", name: "cache", type: "Radius.Cache/redisCaches" }
+            ]
+          },
+          options: { showLegend }
+        })
+      );
+      await within(element).findByRole("group", { name: "cache" });
+      await waitFor(() =>
+        expect(element.querySelectorAll(".legend")).toHaveLength(
+          showLegend ? 1 : 0
+        )
+      );
+      expect(within(element).getAllByRole("region")).toEqual([section]);
+      expect(element.querySelectorAll(".radius-graph__viewport")).toHaveLength(
+        1
+      );
+      expect(element.querySelector(".radius-graph__viewport")).toBe(viewport);
+      expect(element.querySelectorAll(".react-flow")).toHaveLength(1);
+      expect(element.querySelector(".react-flow")).toBe(flow);
+      expect(element.querySelectorAll("[data-radius-details]")).toHaveLength(1);
+      expect(element.querySelector("[data-radius-details]")).toBe(panel);
+      expect(within(element).queryByRole("group", { name: "web" })).toBeNull();
+    }
+  });
+
+  it("mounts without a parent and measures its cards when the host is attached", async () => {
+    const element = document.createElement("div");
+    element.style.width = "800px";
+    element.style.height = "600px";
+    const mounted = mountRadiusGraph(element, {
+      graph: { kind: "modeled", resources: RESOURCES },
+      options: { showLegend: true }
+    });
+    disposers.push(() => {
+      mounted.unmount();
+      element.remove();
+    });
+    await waitFor(() =>
+      expect(element.querySelector(".legend")).not.toBeNull()
+    );
+    expect(element.parentNode).toBeNull();
+    expect(element.querySelectorAll(".radius-graph")).toHaveLength(1);
+    expect(element.querySelector(".legend")?.textContent).toContain("Compute");
+    document.body.appendChild(element);
+    const web = await within(element).findByRole("group", { name: "web" });
+    await waitFor(() =>
+      expect(web.getBoundingClientRect().width).toBeGreaterThan(0)
+    );
+    expect(element.querySelectorAll(".legend")).toHaveLength(1);
+    expect(element.querySelectorAll("[data-radius-details]")).toHaveLength(1);
+  });
+
+  it("lays out all resource nodes before committing the first flow DOM", async () => {
+    const { root, element } = host();
+    const layout = dagre.layout;
+    const phases: Array<{ flowMounted: boolean; ids: string[] }> = [];
+    vi.spyOn(dagre, "layout").mockImplementation((graph, options) => {
+      phases.push({
+        flowMounted: element.querySelector(".react-flow") !== null,
+        ids: graph.nodes()
+      });
+      layout(graph, options);
+    });
+    root.render(
+      h(RadiusGraph, {
+        graph: { kind: "modeled", resources: RESOURCES }
+      })
+    );
+    const web = await within(element).findByRole("group", { name: "web" });
+    const db = await within(element).findByRole("group", { name: "db" });
+    expect(phases).toEqual([
+      {
+        flowMounted: false,
+        ids: ["app/web", "app/db"]
+      }
+    ]);
+    expect(db.getBoundingClientRect().top).toBeGreaterThan(
+      web.getBoundingClientRect().bottom
+    );
   });
 
   it("opens a local source without requiring a remote repository URL", async () => {
@@ -543,9 +652,28 @@ describe("public host-neutral React API", () => {
         callbacks: { onOpenSource: () => {} }
       })
     );
+    const web = await within(element).findByRole("group", { name: "web" });
+    const detailsButton = within(web).getByRole("button", {
+      name: "Show details"
+    });
+    const hidden = element.querySelector<HTMLElement>("[data-radius-details]");
+    expect(element.querySelectorAll("[data-radius-details]")).toHaveLength(1);
+    expect(hidden?.style.display).toBe("none");
+    expect(hidden?.style.position).toBe("absolute");
     const panel = await openDetails(element, "web");
+    expect(panel).toBe(hidden);
     const anchoredToWeb = panel.style.top;
     expect(panel.style.display).not.toBe("none");
+    const viewport = element.querySelector(".radius-graph__viewport");
+    if (!(viewport instanceof HTMLElement))
+      throw new Error("missing graph viewport");
+    const cardBox = web.getBoundingClientRect();
+    const viewportBox = viewport.getBoundingClientRect();
+    expect(parseFloat(panel.style.top)).toBeCloseTo(
+      Math.max(0, cardBox.top - viewportBox.top)
+    );
+    expect(parseFloat(panel.style.left)).toBeGreaterThanOrEqual(0);
+    expect(document.activeElement).toBe(detailsButton);
 
     await userEvent.click(
       within(panel).getByRole("link", { name: /View source code/ })
@@ -562,8 +690,13 @@ describe("public host-neutral React API", () => {
 
     const pane = element.querySelector(".react-flow__pane");
     if (!(pane instanceof HTMLElement)) throw new Error("missing graph pane");
+    const restoreFocus = vi.spyOn(detailsButton, "focus");
     pane.click();
     await waitFor(() => expect(panel.style.display).toBe("none"));
+    expect(document.activeElement).toBe(detailsButton);
+    expect(restoreFocus).toHaveBeenCalledTimes(1);
+    pane.click();
+    expect(restoreFocus).toHaveBeenCalledTimes(1);
   });
 
   it("routes a panel destination through the host instead of navigating", async () => {
@@ -582,14 +715,112 @@ describe("public host-neutral React API", () => {
       })
     );
     const panel = await openDetails(element, "web");
+    const source = within(panel).getByRole("link", {
+      name: /View source code/
+    });
+    const definition = within(panel).getByRole("link", {
+      name: /View app definition/
+    });
+    expect(source.getAttribute("href")).toBe(
+      "https://github.com/example/app/blob/main/src/web.ts#L4"
+    );
+    expect(definition.getAttribute("href")).toBe(
+      "https://github.com/example/app/blob/main/.radius/app.bicep"
+    );
+    for (const link of [source, definition]) {
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+      expect(link.querySelector("svg[aria-hidden='true']")).not.toBeNull();
+    }
     const here = window.location.href;
+    let activation: Event | undefined;
+    source.addEventListener(
+      "click",
+      (event) => {
+        activation = event;
+      },
+      { once: true }
+    );
     await userEvent.click(
       within(panel).getByRole("link", { name: /View source code/ })
     );
+    expect(activation?.defaultPrevented).toBe(true);
     expect(external).toEqual([
       "https://github.com/example/app/blob/main/src/web.ts#L4"
     ]);
     expect(window.location.href).toBe(here);
+  });
+
+  it("escapes source paths and cloud names without losing local callback arguments", async () => {
+    const { root, element } = host();
+    const path = '<img src=x onerror="1">';
+    const message = "<script>alert(1)</script>";
+    const local = vi.fn();
+    root.render(
+      h(RadiusGraph, {
+        graph: {
+          kind: "deployed-projection",
+          resources: [
+            {
+              id: "web",
+              name: "web",
+              codeReference: path,
+              deployMessage: message,
+              outputResources: [
+                {
+                  name: "<b>db</b>",
+                  id: "/subscriptions/s/rg/db"
+                }
+              ]
+            }
+          ]
+        },
+        options: { localSource: true },
+        callbacks: { onOpenSource: local }
+      })
+    );
+    const panel = await openDetails(element, "web");
+    expect(panel.querySelector("script, img, b")).toBeNull();
+    expect(panel.textContent).toContain(message);
+    expect(panel.textContent).toContain(path);
+    expect(panel.textContent).toContain("<b>db</b> in Azure portal");
+    const source = within(panel).getByRole("link", {
+      name: "View source code"
+    });
+    expect(source.getAttribute("href")).toBe("#");
+    expect(source.hasAttribute("target")).toBe(false);
+    const here = window.location.href;
+    await userEvent.click(source);
+    expect(local).toHaveBeenCalledExactlyOnceWith({
+      path,
+      line: 0,
+      fallbackUrl: ""
+    });
+    expect(window.location.href).toBe(here);
+  });
+
+  it("keeps an unsafe panel destination inert when activated", async () => {
+    const { root, element } = host();
+    const external = vi.fn();
+    root.render(
+      h(RadiusGraph, {
+        graph: {
+          kind: "modeled",
+          resources: [{ id: "web", name: "web", codeReference: "src/web.ts" }]
+        },
+        options: { repoUrl: "javascript:alert(1)" },
+        callbacks: { onOpenExternal: external }
+      })
+    );
+    const panel = await openDetails(element, "web");
+    const row = within(panel).getByText("View source code");
+    expect(row.closest("[aria-disabled='true']")).not.toBeNull();
+    expect(row.closest("a")).toBeNull();
+    const here = window.location.href;
+    await userEvent.click(row);
+    expect(external).not.toHaveBeenCalled();
+    expect(window.location.href).toBe(here);
+    expect(panel.style.display).not.toBe("none");
   });
 
   it("leaves panel rows natively navigable for a host with no open capability", async () => {
@@ -808,6 +1039,211 @@ async function waitForStableTransform(viewport: HTMLElement): Promise<string> {
 }
 
 describe("graph view in a real browser", () => {
+  it("populates an initially empty graph through its existing mount", async () => {
+    const { graph, host } = mount({ resources: [], showLegend: true });
+    await within(host).findByText("No resources in this application.");
+    const section = within(host).getByRole("region");
+    expect(host.querySelector(".react-flow")).toBeNull();
+    expect(host.querySelector(".legend")).toBeNull();
+    expect(host.querySelector("[data-radius-details]")).toBeNull();
+    expect(graph.update([])).toBe(true);
+    expect(graph.update(RESOURCES)).toBe(true);
+    await within(host).findByRole("group", { name: "web" });
+    await within(host).findByRole("group", { name: "db" });
+    expect(within(host).getByRole("region")).toBe(section);
+    expect(
+      within(host).queryByText("No resources in this application.")
+    ).toBeNull();
+    expect(host.querySelectorAll(".react-flow")).toHaveLength(1);
+    expect(host.querySelectorAll(".legend")).toHaveLength(1);
+    expect(host.querySelectorAll("[data-radius-details]")).toHaveLength(1);
+  });
+
+  it("removes the flow, details panel and legend when a populated graph becomes empty", async () => {
+    const { graph, host } = mount({ showLegend: true });
+    const web = await card("web");
+    await userEvent.click(
+      within(web).getByRole("button", { name: "Show details" })
+    );
+    const panel = host.querySelector<HTMLElement>("[data-radius-details]");
+    expect(panel?.style.display).not.toBe("none");
+    expect(host.querySelectorAll(".legend")).toHaveLength(1);
+    expect(graph.update([])).toBe(true);
+    await within(host).findByText("No resources in this application.");
+    expect(host.querySelector(".react-flow")).toBeNull();
+    expect(host.querySelector(".legend")).toBeNull();
+    expect(host.querySelector("[data-radius-details]")).toBeNull();
+    expect(graph.update(RESOURCES)).toBe(true);
+    await within(host).findByRole("group", { name: "web" });
+    expect(host.querySelectorAll("[data-radius-details]")).toHaveLength(1);
+    expect(host.querySelector("[data-radius-details]")).not.toBe(panel);
+  });
+
+  it("filters category legends exactly like the rendered resource nodes", async () => {
+    const { host } = mount({
+      showLegend: true,
+      resources: [
+        ...RESOURCES,
+        {
+          id: "app/image",
+          name: "image",
+          type: "Radius.Compute/containerImages"
+        }
+      ]
+    });
+    await card("web");
+    await card("db");
+    expect(
+      Array.from(host.querySelectorAll(".rad-node"), (node) =>
+        node.getAttribute("data-node-id")
+      )
+    ).toEqual(["app/web", "app/db"]);
+    expect(
+      Array.from(
+        host.querySelectorAll(".legend-item"),
+        (item) => item.textContent
+      )
+    ).toEqual(["Compute", "Data Store"]);
+    expect(host.querySelector(".legend")?.textContent).not.toContain(
+      "Registry"
+    );
+    const legend = host.querySelector(".legend");
+    const viewport = host.querySelector(".radius-graph__viewport");
+    expect(legend?.nextElementSibling).toBe(viewport);
+  });
+
+  it("updates the category legend from Compute to Cache without remounting", async () => {
+    const { graph, host } = mount({
+      showLegend: true,
+      resources: [
+        { id: "app/web", name: "web", type: "Radius.Compute/containers" }
+      ]
+    });
+    await card("web");
+    const flow = host.querySelector(".react-flow");
+    const legend = host.querySelector(".legend");
+    expect(legend?.textContent).toBe("Compute");
+    expect(
+      graph.update([
+        {
+          id: "app/cache",
+          name: "cache",
+          type: "Radius.Cache/redisCaches"
+        }
+      ])
+    ).toBe(true);
+    await card("cache");
+    expect(host.querySelector(".react-flow")).toBe(flow);
+    expect(host.querySelector(".legend")).toBe(legend);
+    expect(legend?.textContent).toBe("Cache");
+    expect(host.querySelectorAll(".legend")).toHaveLength(1);
+  });
+
+  it("replaces the pending deployment legend and spinner with terminal status", async () => {
+    const { graph, host } = mount({
+      deployMode: true,
+      showLegend: true,
+      resources: [
+        {
+          id: "app/web",
+          name: "web",
+          type: "Radius.Compute/containers",
+          deployStatus: "in_progress"
+        }
+      ]
+    });
+    await card("web");
+    const legend = host.querySelector(".legend");
+    expect(legend?.textContent).toBe("Pending / deploying");
+    expect(
+      decodeURIComponent(legend?.querySelector("img")?.src ?? "")
+    ).toContain("animation:spin");
+    expect(
+      graph.update([
+        {
+          id: "app/web",
+          name: "web",
+          type: "Radius.Compute/containers",
+          deployStatus: "success"
+        }
+      ])
+    ).toBe(true);
+    await within(host).findByAltText("Deployed");
+    expect(host.querySelector(".legend")).toBe(legend);
+    expect(legend?.textContent).toBe("Deployed");
+    expect(
+      decodeURIComponent(legend?.querySelector("img")?.src ?? "")
+    ).not.toContain("animation:spin");
+    expect(host.querySelectorAll(".legend")).toHaveLength(1);
+  });
+
+  it.each(["omitted", "disabled", "diff", "empty"] as const)(
+    "omits the legend when %s",
+    async (scenario) => {
+      const { host } = mount({
+        ...(scenario === "omitted" ?
+          {}
+        : { showLegend: scenario !== "disabled" }),
+        diffMode: scenario === "diff",
+        resources: scenario === "empty" ? [] : RESOURCES
+      });
+      if (scenario === "empty")
+        await within(host).findByText("No resources in this application.");
+      else await card("web");
+      expect(host.querySelector(".legend")).toBeNull();
+    }
+  );
+
+  it.each([true, false])(
+    "connects card and dots to one panel and its source callbacks (local=%s)",
+    async (localSource) => {
+      const { host, recorded } = mount({ localSource });
+      const web = await card("web");
+      await page.getByRole("group", { name: "web", exact: true }).click();
+      const panel = host.querySelector<HTMLElement>("[data-radius-details]");
+      if (!panel) throw new Error("missing details panel");
+      expect(panel.style.display).not.toBe("none");
+      const definition = within(panel).getByRole("link", {
+        name: "View app definition"
+      });
+      expect(definition.getAttribute("href")).toBe(
+        "https://github.test/o/r/blob/feature-branch/.radius/app.bicep"
+      );
+      await userEvent.click(definition);
+      const dots = within(web).getByRole("button", { name: "Show details" });
+      await userEvent.click(dots);
+      expect(panel.style.display).toBe("none");
+      await userEvent.click(dots);
+      expect(panel.style.display).not.toBe("none");
+      expect(host.querySelectorAll("[data-radius-details]")).toHaveLength(1);
+      expect(host.querySelector("[data-radius-details]")).toBe(panel);
+      await userEvent.click(
+        within(panel).getByRole("link", { name: "View source code" })
+      );
+      if (localSource) {
+        expect(recorded.local).toEqual([
+          [
+            ".radius/app.bicep",
+            0,
+            "https://github.test/o/r/blob/feature-branch/.radius/app.bicep"
+          ],
+          [
+            "src/web.ts",
+            4,
+            "https://github.test/o/r/blob/feature-branch/src/web.ts#L4"
+          ]
+        ]);
+        expect(recorded.external).toEqual([]);
+      } else {
+        expect(recorded.external).toEqual([
+          "https://github.test/o/r/blob/feature-branch/.radius/app.bicep",
+          "https://github.test/o/r/blob/feature-branch/src/web.ts#L4"
+        ]);
+        expect(recorded.local).toEqual([]);
+      }
+    }
+  );
+
   it("routes a details-panel source link through the same host callback as the card", async () => {
     const { host, recorded } = mount({ localSource: true });
     const web = await card("web");
@@ -820,8 +1256,23 @@ describe("graph view in a real browser", () => {
     await userEvent.click(
       within(panel).getByRole("link", { name: "View source code" })
     );
-    expect(recorded.local).toHaveLength(1);
-    expect(recorded.local[0][0]).toContain("src/");
+    expect(recorded.local).toEqual([
+      [
+        "src/web.ts",
+        4,
+        "https://github.test/o/r/blob/feature-branch/src/web.ts#L4"
+      ]
+    ]);
+    const definition = within(panel).getByRole("link", {
+      name: "View app definition"
+    });
+    expect(definition.getAttribute("target")).toBeNull();
+    await userEvent.click(definition);
+    expect(recorded.local[1]).toEqual([
+      ".radius/app.bicep",
+      0,
+      "https://github.test/o/r/blob/feature-branch/.radius/app.bicep"
+    ]);
   });
 
   it("does not open details when a deployed portal link is activated", async () => {
@@ -896,6 +1347,27 @@ describe("graph view in a real browser", () => {
     // cannot make: React Flow only paints once it has measured its container.
     expect(web.getBoundingClientRect().width).toBeGreaterThan(0);
     expect(db.getBoundingClientRect().height).toBeGreaterThan(0);
+    expect(web.style.boxSizing).toBe("border-box");
+    expect(web.style.background).toBe("var(--rad-node-bg)");
+    expect(web.style.borderColor).toBe("var(--rad-node-border)");
+    expect(web.style.borderWidth).toBe("2.5px");
+    expect(web.style.borderStyle).toBe("solid");
+    expect(within(web).getByTitle("web").textContent).toBe("web");
+    expect(web.querySelector(".rad-node__icon")?.getAttribute("src")).toMatch(
+      /^data:image\/svg\+xml/
+    );
+    expect(web.querySelector(".rad-node__badge")).toBeNull();
+    expect(web.querySelector(".rad-node__head")?.className).toBe(
+      "rad-node__head"
+    );
+    const shell = web.closest(".rad-node-shell");
+    expect(shell?.querySelectorAll(".react-flow__handle")).toHaveLength(2);
+    expect(
+      shell?.querySelector(".react-flow__handle-top.target")
+    ).not.toBeNull();
+    expect(
+      shell?.querySelector(".react-flow__handle-bottom.source")
+    ).not.toBeNull();
   });
 
   it("keeps long resource names inside the card", async () => {
@@ -969,7 +1441,74 @@ describe("graph view in a real browser", () => {
       "https://portal.azure.com/#@tenant/resource/server"
     );
     expect(portal.getAttribute("target")).toBe("_blank");
+    expect(portal.getAttribute("rel")).toBe("noopener noreferrer");
     expect(recorded.opened).toEqual([]);
+  });
+
+  it.each([
+    ["in_progress", "In progress"],
+    ["success", "Deployed"],
+    ["failed", "Failed"]
+  ])(
+    "labels the %s badge for assistive technology",
+    async (deployStatus, alt) => {
+      mount({
+        deployMode: true,
+        resources: [{ id: "web", name: "web", deployStatus }]
+      });
+      const web = await card("web");
+      const badge = within(web).getByAltText(alt);
+      expect(badge.className).toBe("rad-node__badge");
+      expect(badge.getAttribute("src")).toMatch(/^data:image\/svg\+xml/);
+      expect(web.querySelector(".rad-node__head")?.className).toBe(
+        "rad-node__head rad-node__head--with-badge"
+      );
+    }
+  );
+
+  it("does not render an unsafe deployed portal link and still opens card details", async () => {
+    const { host, recorded } = mount({
+      deployMode: true,
+      resources: [
+        {
+          id: "web",
+          name: "web",
+          portalUrl: "javascript:alert(1)"
+        }
+      ]
+    });
+    const web = await card("web");
+    expect(within(web).queryByRole("link")).toBeNull();
+    await page.getByRole("group", { name: "web", exact: true }).click();
+    expect(recorded.opened).toEqual(["web"]);
+    expect(
+      host.querySelector<HTMLElement>("[data-radius-details]")?.style.display
+    ).not.toBe("none");
+  });
+
+  it("fits the type label again when its resource type changes", async () => {
+    const { graph } = mount({
+      resources: [{ id: "web", name: "web", type: "Radius.Compute/containers" }]
+    });
+    const web = await card("web");
+    const label = within(web).getByTitle("Compute/containers");
+    expect(label.style.fontSize).toBe("13px");
+    const longType = "Microsoft.Example/" + "exceptionallylongtype".repeat(20);
+    expect(graph.update([{ id: "web", name: "web", type: longType }])).toBe(
+      true
+    );
+    await waitFor(() => expect(label.style.fontSize).toBe("7px"));
+    expect(label.scrollWidth).toBeGreaterThan(label.clientWidth);
+    expect(
+      graph.update([
+        {
+          id: "web",
+          name: "web",
+          type: "Radius.Compute/containers"
+        }
+      ])
+    ).toBe(true);
+    await waitFor(() => expect(label.style.fontSize).toBe("13px"));
   });
 
   it("places connected nodes on separate rows using the real dagre layout", async () => {
@@ -985,8 +1524,88 @@ describe("graph view in a real browser", () => {
     );
   });
 
+  it("keeps the graph draggable and selectable without connectable handles or nested keyboard targets", async () => {
+    const { host } = mount();
+    const web = await card("web");
+    const db = await card("db");
+    const viewport = host.querySelector<HTMLElement>(".react-flow__viewport");
+    if (!viewport) throw new Error("missing graph viewport");
+    await waitForStableTransform(viewport);
+    const wrapper = web.closest<HTMLElement>(".react-flow__node");
+    expect(wrapper?.hasAttribute("tabindex")).toBe(false);
+    expect(wrapper?.getAttribute("role")).not.toBe("button");
+    const edge = host.querySelector(".react-flow__edge");
+    expect(edge).not.toBeNull();
+    expect(edge?.hasAttribute("tabindex")).toBe(false);
+    const path = edge?.querySelector("path");
+    expect(path?.getAttribute("marker-end")).toBe("url('#')");
+    expect(path?.getAttribute("marker-start")).toBe("url('#')");
+    expect(host.querySelector("marker")).toBeNull();
+    expect(host.querySelector(".react-flow__minimap")).toBeNull();
+    expect(host.querySelector(".react-flow__attribution")).toBeNull();
+    expect(host.querySelector(".react-flow__controls-interactive")).toBeNull();
+    const handles = host.querySelectorAll(".react-flow__handle");
+    expect(handles).toHaveLength(4);
+    for (const handle of handles) {
+      expect(handle.classList.contains("connectable")).toBe(false);
+    }
+    const background = host.querySelector("svg.react-flow__background");
+    expect(background).not.toBeNull();
+    for (const element of [
+      background,
+      ...host.querySelectorAll(".react-flow__background *")
+    ]) {
+      if (!element) throw new Error("missing background element");
+      for (const attribute of element.attributes) {
+        if (attribute.name !== "style")
+          expect(attribute.value).not.toContain("var(--");
+      }
+    }
+    const pattern = background?.querySelector("pattern");
+    const zoom = new DOMMatrixReadOnly(viewport.style.transform).a;
+    expect(Number(pattern?.getAttribute("width")) / zoom).toBeCloseTo(16);
+
+    const before = wrapper?.style.transform;
+    await browserUserEvent.dragAndDrop(web, db);
+    await waitFor(() => expect(wrapper?.style.transform).not.toBe(before));
+    expect(wrapper?.classList.contains("selected")).toBe(true);
+    expect(host.querySelectorAll(".react-flow__edge")).toHaveLength(1);
+  });
+
+  it("bounds zoom between the incumbent minimum and maximum", async () => {
+    const { host } = mount();
+    await card("web");
+    const viewport = host.querySelector<HTMLElement>(".react-flow__viewport");
+    if (!viewport) throw new Error("missing graph viewport");
+    await waitForStableTransform(viewport);
+    const hostBox = host.getBoundingClientRect();
+    for (const node of host.querySelectorAll(".rad-node")) {
+      const box = node.getBoundingClientRect();
+      expect(box.left).toBeGreaterThan(hostBox.left);
+      expect(box.right).toBeLessThan(hostBox.right);
+      expect(box.top).toBeGreaterThan(hostBox.top);
+      expect(box.bottom).toBeLessThan(hostBox.bottom);
+    }
+    for (const [name, expected] of [
+      ["zoom out", 0.2],
+      ["zoom in", 2]
+    ] as const) {
+      const control = within(host).getByRole<HTMLButtonElement>("button", {
+        name
+      });
+      for (let step = 0; step < 30 && !control.disabled; step++) {
+        await userEvent.click(control);
+        await waitForStableTransform(viewport);
+      }
+      expect(control.disabled).toBe(true);
+      expect(new DOMMatrixReadOnly(viewport.style.transform).a).toBeCloseTo(
+        expected
+      );
+    }
+  });
+
   it("exposes the details control by accessible name and activates it from the keyboard", async () => {
-    const { recorded } = mount();
+    const { host, recorded } = mount();
     const web = await card("web");
     const details = await within(web).findByRole("button", {
       name: "Show details"
@@ -994,12 +1613,19 @@ describe("graph view in a real browser", () => {
 
     details.focus();
     expect(document.activeElement).toBe(details);
+    expect(details.getAttribute("type")).toBe("button");
+    expect(details.classList.contains("nodrag")).toBe(true);
+    expect(details.classList.contains("nopan")).toBe(true);
+    expect(details.classList.contains("nokey")).toBe(true);
+    const panel = host.querySelector<HTMLElement>("[data-radius-details]");
 
     await userEvent.keyboard("{Enter}");
     expect(recorded.toggled).toEqual(["app/web:card"]);
+    expect(panel?.style.display).not.toBe("none");
 
     await userEvent.keyboard("[Space]");
     expect(recorded.toggled).toEqual(["app/web:card", "app/web:card"]);
+    expect(panel?.style.display).toBe("none");
     // The control keeps focus, so the next key still reaches the same card.
     expect(document.activeElement).toBe(details);
   });
@@ -1010,12 +1636,32 @@ describe("graph view in a real browser", () => {
     const link = await within(web).findByRole("link", {
       name: /View source code/
     });
+    expect(link.getAttribute("href")).toBe(
+      "https://github.test/o/r/blob/feature-branch/src/web.ts#L4"
+    );
+    expect(link.hasAttribute("target")).toBe(false);
+    expect(link.classList.contains("nodrag")).toBe(true);
+    expect(link.classList.contains("nopan")).toBe(true);
+    expect(link.classList.contains("nokey")).toBe(true);
+    let activation: Event | undefined;
+    link.addEventListener(
+      "click",
+      (event) => {
+        activation = event;
+      },
+      { once: true }
+    );
 
     await userEvent.click(link);
+    expect(activation?.defaultPrevented).toBe(true);
 
-    expect(recorded.local).toHaveLength(1);
-    expect(recorded.local[0][0]).toBe("src/web.ts");
-    expect(recorded.local[0][1]).toBe(4);
+    expect(recorded.local).toEqual([
+      [
+        "src/web.ts",
+        4,
+        "https://github.test/o/r/blob/feature-branch/src/web.ts#L4"
+      ]
+    ]);
     // A real navigation would have torn the document down.
     expect(document.body.contains(link)).toBe(true);
     // The card's own click handler must not also fire for a source click.
@@ -1028,14 +1674,26 @@ describe("graph view in a real browser", () => {
     const link = await within(web).findByRole("link", {
       name: /View source code/
     });
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    let activation: Event | undefined;
+    link.addEventListener(
+      "click",
+      (event) => {
+        activation = event;
+      },
+      { once: true }
+    );
 
     await userEvent.click(link);
+    expect(activation?.defaultPrevented).toBe(true);
 
     expect(recorded.external).toEqual([
       "https://github.test/o/r/blob/feature-branch/src/web.ts#L4"
     ]);
     expect(document.body.contains(link)).toBe(true);
     expect(recorded.opened).toEqual([]);
+    expect(recorded.local).toEqual([]);
   });
 
   it("opens an exact GitHub source URL externally from a worktree graph", async () => {
@@ -1093,7 +1751,13 @@ describe("graph view in a real browser", () => {
       await within(web).findByRole("link", { name: /View source code/ })
     );
 
-    expect(recorded.local).toEqual([["src/web.ts", 4, expect.any(String)]]);
+    expect(recorded.local).toEqual([
+      [
+        "src/web.ts",
+        4,
+        "https://github.test/o/r/blob/feature-branch/src/web.ts#L4"
+      ]
+    ]);
     expect(recorded.external).toEqual([]);
 
     const worker = await card("old-worker");
@@ -1134,16 +1798,24 @@ describe("graph view in a real browser", () => {
     ]);
   });
 
-  it("marks the source row disabled when the node has no reference", async () => {
-    mount({ localSource: true });
-    const db = await card("db");
+  it.each([true, false])(
+    "marks the source row disabled without a reference (local=%s)",
+    async (localSource) => {
+      mount({
+        localSource,
+        repoUrl: localSource ? "https://github.test/o/r" : ""
+      });
+      const db = await card("db");
 
-    const row = await within(db).findByRole("button", {
-      name: /View source code/
-    });
-    expect(row.getAttribute("aria-disabled")).toBe("true");
-    expect(within(db).queryByRole("link")).toBeNull();
-  });
+      const row = await within(db).findByRole("button", {
+        name: /View source code/
+      });
+      expect(row.getAttribute("aria-disabled")).toBe("true");
+      expect(row.getAttribute("title")).toBe("No source reference found");
+      expect(row.hasAttribute("href")).toBe(false);
+      expect(within(db).queryByRole("link")).toBeNull();
+    }
+  );
 
   it("reaches every card by keyboard alone in document order", async () => {
     mount();
@@ -1257,6 +1929,39 @@ describe("graph view in a real browser", () => {
     expect(await waitForStableTransform(viewport)).toBe(zoomedTransform);
   });
 
+  it("does not schedule a re-fit for a shuffled status refresh", async () => {
+    const { graph, host } = mount({ deployMode: true });
+    await card("web");
+    const viewport = host.querySelector<HTMLElement>(".react-flow__viewport");
+    if (!viewport) throw new Error("missing graph viewport");
+    await waitForStableTransform(viewport);
+    await userEvent.click(
+      within(host).getByRole("button", { name: "zoom out" })
+    );
+    const zoomed = await waitForStableTransform(viewport);
+    const timer = vi.spyOn(window, "setTimeout");
+    try {
+      expect(
+        graph.update(
+          [...RESOURCES].reverse().map((resource) => ({
+            ...resource,
+            deployStatus: "failed"
+          }))
+        )
+      ).toBe(true);
+      await within(host).findAllByAltText("Failed");
+      expect(await waitForStableTransform(viewport)).toBe(zoomed);
+      expect(timer.mock.calls.filter(([, delay]) => delay === 40)).toEqual([]);
+      const ids = Array.from(host.querySelectorAll(".rad-node"), (node) =>
+        node.getAttribute("data-node-id")
+      );
+      expect(ids).toEqual(["app/db", "app/web"]);
+      expect(host.querySelectorAll(".react-flow__edge")).toHaveLength(1);
+    } finally {
+      timer.mockRestore();
+    }
+  });
+
   it("re-fits a zoomed viewport when the update changes which nodes exist", async () => {
     const { graph, host } = mount({ deployMode: true });
     await card("web");
@@ -1289,6 +1994,52 @@ describe("graph view in a real browser", () => {
 
     await card("api");
     expect(await waitForStableTransform(viewport)).not.toBe(zoomedTransform);
+    await userEvent.click(zoomOut);
+    const refittedThenZoomed = await waitForStableTransform(viewport);
+    const timer = vi.spyOn(window, "setTimeout");
+    try {
+      expect(graph.update(next.resources)).toBe(true);
+      expect(await waitForStableTransform(viewport)).toBe(refittedThenZoomed);
+      expect(timer.mock.calls.filter(([, delay]) => delay === 40)).toEqual([]);
+    } finally {
+      timer.mockRestore();
+    }
+  });
+
+  it("accepts an update before the first render and cancels a pending fit on teardown", async () => {
+    const { graph, host } = mount();
+    expect(graph.update([{ id: "latest", name: "latest" }])).toBe(true);
+    await card("latest");
+    expect(within(host).queryByRole("group", { name: "web" })).toBeNull();
+    const viewport = host.querySelector<HTMLElement>(".react-flow__viewport");
+    if (!viewport) throw new Error("missing graph viewport");
+    await waitForStableTransform(viewport);
+    // Freeze only timeouts after real layout has settled. React and the DOM
+    // still commit normally, but the pending fit cannot beat teardown.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const timer = vi.spyOn(window, "setTimeout");
+    const clear = vi.spyOn(window, "clearTimeout");
+    try {
+      expect(graph.update([{ id: "replacement", name: "replacement" }])).toBe(
+        true
+      );
+      await waitFor(() =>
+        expect(timer.mock.calls.some(([, delay]) => delay === 40)).toBe(true)
+      );
+      const index = timer.mock.calls.findIndex(([, delay]) => delay === 40);
+      expect(index).toBeGreaterThanOrEqual(0);
+      const pending = timer.mock.results[index].value;
+      graph.unmount();
+      expect(clear).toHaveBeenCalledWith(pending);
+      expect(host.textContent).toBe("");
+      expect(host.querySelector("[data-radius-details]")).toBeNull();
+      expect(graph.update(RESOURCES)).toBe(false);
+      expect(() => graph.unmount()).not.toThrow();
+    } finally {
+      timer.mockRestore();
+      clear.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("detaches the real root on unmount and stops answering updates", async () => {

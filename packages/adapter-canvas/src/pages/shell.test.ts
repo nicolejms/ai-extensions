@@ -86,7 +86,7 @@ describe("pageShell", () => {
   it("keeps React Flow chrome transparent over the themed graph surface", () => {
     const html = pageShell("My Title", '<div id="graph-container"></div>');
     const flowStyles = html.match(
-      /\.radius-graph \.react-flow__pane\s*\{([^}]*)\}/
+      /\.radius-graph \.react-flow,\s*\.radius-graph \.react-flow__renderer,\s*\.radius-graph \.react-flow__pane\s*\{([^}]*)\}/
     )?.[1];
     expect(flowStyles).toMatch(/background:\s*transparent/);
   });

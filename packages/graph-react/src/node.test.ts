@@ -43,6 +43,7 @@ describe("type label fitting", () => {
       style: { fontSize: "" }
     };
     expect(fitTypeLabel(element)).toBe(7);
+    expect(element.style.fontSize).toBe("7px");
   });
   it("does not enlarge short labels beyond the incumbent size", () => {
     expect(
