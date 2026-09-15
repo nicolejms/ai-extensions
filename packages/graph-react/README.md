@@ -44,7 +44,7 @@ The host owns loading, retrieval failures, connection selection, permissions, an
 ## Input semantics
 
 | Input kind            | Contract                                                                                                                                                                                             |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `live`                | Normalized UCP resources identified by full IDs; raw optional provisioning status; no diff hashes, inferred deployment success, modeled source links, Canvas visibility filter, or output expansion. |
 | `modeled`             | Canvas modeled resources; hide visualization-only image/registry-secret nodes and expand concrete outputs.                                                                                           |
 | `planned`             | Preserve modeled resource identity/topology, show representative resolved types, and use planned styling.                                                                                            |
@@ -75,7 +75,7 @@ For a server-rendered shell, `mountRadiusGraph(element, props)` mounts this same
 
 The package exports JavaScript and declarations, `styles.css`, and a `presentation` subpath for typed graph presentation helpers. React and ReactDOM remain peers. Canvas bundles shared source into its existing self-contained browser artifact, ultimately `.artifacts/radius/com.github.copilot/extensions/radius/extension.mjs`; no package source is downloaded at runtime. Library release/version handling is separate from Copilot plugin discovery and release selection. No public registry publication is part of this implementation.
 
-The renderer and its existing pure/browser scenarios were extracted from `ai-extensions` at `172782e`. The old Canvas renderer, layout, details, legend, model, and graph-specific stylesheet ownership were removed rather than copied into a second implementation. Canvas compatibility files only forward shared exports.
+The renderer and its existing pure/browser scenarios were extracted from `ai-extensions` at `172782e`. The old Canvas renderer, layout, details, legend, model, and graph-specific stylesheet ownership were removed rather than copied into a second implementation. Canvas callers import the shared public API directly; no legacy graph forwarding modules remain.
 
 The design inputs are `docs/design/2026-09-radius-backstage-plugin.md` and `docs/design/2026-09-dashboard-plugin-test-plan.md` from dashboard commit `fd90d938267ceab5935b037bc7dd1ff59831e8b5`. The live normalization implementation and local fixtures are independently authored from those contracts. Dashboard implementation/fixture code was not copied because its package/repository license discrepancy remains unresolved.
 

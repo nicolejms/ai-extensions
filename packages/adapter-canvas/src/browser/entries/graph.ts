@@ -7,8 +7,10 @@ import { publishBrowserGlobals } from "../globals.js";
 import { isRecord } from "../json.js";
 import { beginEntry, NOOP_TEARDOWN } from "../lifecycle.js";
 import { resolvePageRegistry, runBrowserEntry } from "../registry.js";
-import type { GraphOptions } from "../graph/build.js";
-import type { GraphResource } from "../graph/model.js";
+import type {
+  GraphOptions,
+  GraphResource
+} from "@radius-project/graph-react/presentation";
 import type { GraphMount } from "../graph/surface.js";
 import type { BrowserTeardown } from "../lifecycle.js";
 import type { BrowserContext } from "../ports.js";
