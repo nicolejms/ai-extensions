@@ -11,47 +11,22 @@
 // labels) are reproduced verbatim from the legacy renderer so the compiled
 // bundle keeps the same text.
 
-import { isRecord } from "../json.js";
+import type { GraphResource, ResourceOutput } from "@radius-project/core/graph";
+export type {
+  GraphResource,
+  ResourceOutput,
+  ResourceConnection
+} from "@radius-project/core/graph";
 
 // The resource fields the model reads. Server-serialized graph data satisfies
 // this shape structurally; every field is optional because a modeled, planned,
 // diff or deployed graph each populate a different subset.
-export interface ResourceOutput {
-  id?: string;
-  name?: string;
-  type?: string;
-  displayType?: string;
-  deployStatus?: string;
-  portalUrl?: string;
-}
-
-export interface ResourceConnection {
-  id?: string;
-  name?: string;
-  direction?: string;
-  diffStatus?: string;
-}
-
-export interface GraphResource {
-  id?: string;
-  name?: string;
-  type?: string;
-  displayType?: string;
-  icon?: string;
-  codeReference?: string;
-  definitionFile?: string;
-  definitionLine?: number;
-  diffStatus?: string;
-  deployStatus?: string;
-  deployMessage?: string;
-  portalUrl?: string;
-  outputResources?: Array<ResourceOutput | null>;
-  connections?: Array<ResourceConnection | null>;
-}
-
 export function parseGraphResources(value: unknown): GraphResource[] {
   return Array.isArray(value) ?
-      value.filter((entry): entry is GraphResource => isRecord(entry))
+      value.filter(
+        (entry): entry is GraphResource =>
+          typeof entry === "object" && entry !== null && !Array.isArray(entry)
+      )
     : [];
 }
 

@@ -12,3 +12,15 @@ export {
   projectDeployedGraph
 } from "./deployed.js";
 export type { DeployStatus } from "./deployed.js";
+export { graphContextKey, normalizeLiveGraph } from "./live.js";
+export type { LiveGraphOptions } from "./live.js";
+export type {
+  GraphContext,
+  GraphResource,
+  LiveGraph,
+  LiveGraphResource,
+  ModeledGraph,
+  RadiusGraphData,
+  ResourceConnection,
+  ResourceOutput
+} from "./contracts.js";

@@ -9,11 +9,11 @@ import {
   symlinkSync,
   writeFileSync
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { versionPlan } from "../../../../scripts/release-version.mjs";
+import { libraryNames } from "../../../../scripts/libraries.mjs";
 
 const plugins = [{ name: "radius" }, { name: "radius-aws" }];
 const repoRoot = fileURLToPath(new URL("../../../..", import.meta.url));
@@ -40,12 +40,19 @@ function writePlugin(root, name) {
 }
 
 function workspace() {
-  const root = mkdtempSync(join(tmpdir(), "radius-release-version-"));
+  const artifacts = join(repoRoot, ".artifacts");
+  mkdirSync(artifacts, { recursive: true });
+  const root = mkdtempSync(join(artifacts, "radius-release-version-"));
   temporaryRepositories.push(root);
   mkdirSync(join(root, "scripts"));
   mkdirSync(join(root, ".changeset"));
   mkdirSync(join(root, ".github", "plugin"), { recursive: true });
-  for (const name of ["plugins.mjs", "version.mjs", "release-version.mjs"]) {
+  for (const name of [
+    "plugins.mjs",
+    "libraries.mjs",
+    "version.mjs",
+    "release-version.mjs"
+  ]) {
     copyFileSync(join(repoRoot, "scripts", name), join(root, "scripts", name));
   }
   symlinkSync(
@@ -59,11 +66,21 @@ function workspace() {
     join(root, "pnpm-workspace.yaml"),
     "packages:\n  - extensions/*\n  - packages/*\n"
   );
-  // Mirrors production: the internal packages are permanently ignored in the
-  // config file, which is what makes a CLI `--ignore` illegal.
+  // Public libraries are versionable but must never join a plugin release.
   writeJson(join(root, "packages", "core", "package.json"), {
     name: "@radius-project/core",
-    version: "0.0.0",
+    version: "0.1.0",
+    publishConfig: { access: "public" }
+  });
+  writeJson(join(root, "packages", "graph-react", "package.json"), {
+    name: "@radius-project/graph-react",
+    version: "0.1.0",
+    dependencies: { "@radius-project/core": "workspace:*" },
+    publishConfig: { access: "public" }
+  });
+  writeJson(join(root, "packages", "internal", "package.json"), {
+    name: "@radius-project/internal",
+    version: "0.1.0",
     private: true
   });
   writeJson(join(root, ".changeset", "config.json"), {
@@ -75,7 +92,7 @@ function workspace() {
     baseBranch: "main",
     updateInternalDependencies: "patch",
     privatePackages: { version: true, tag: false },
-    ignore: ["@radius-project/core"]
+    ignore: ["@radius-project/internal"]
   });
   writePlugin(root, "radius");
   writePlugin(root, "radius-aws");
@@ -98,6 +115,14 @@ function workspace() {
   writeFileSync(
     join(root, ".changeset", "radius-aws.md"),
     '---\n"radius-aws": major\n---\n\nRelease radius-aws.\n'
+  );
+  writeFileSync(
+    join(root, ".changeset", "core.md"),
+    '---\n"@radius-project/core": minor\n---\n\nAdd graph contracts.\n'
+  );
+  writeFileSync(
+    join(root, ".changeset", "graph-react.md"),
+    '---\n"@radius-project/graph-react": minor\n---\n\nAdd the graph renderer.\n'
   );
   return root;
 }
@@ -154,7 +179,7 @@ describe("scripts/release-version.mjs", () => {
     expect(result.status, result.stderr).toBe(0);
     // The temporary scope must never reach the release commit.
     expect(readFileSync(config, "utf8")).toBe(before);
-    expect(JSON.parse(before).ignore).toEqual(["@radius-project/core"]);
+    expect(JSON.parse(before).ignore).toEqual(["@radius-project/internal"]);
   });
 
   it("versions one plugin and leaves the other plugin queued", () => {
@@ -181,6 +206,14 @@ describe("scripts/release-version.mjs", () => {
     ).toBe("1.0.0");
     expect(existsSync(join(root, ".changeset", "radius.md"))).toBe(false);
     expect(existsSync(join(root, ".changeset", "radius-aws.md"))).toBe(true);
+    for (const name of ["core", "graph-react"]) {
+      expect(existsSync(join(root, ".changeset", `${name}.md`))).toBe(true);
+      expect(
+        JSON.parse(
+          readFileSync(join(root, "packages", name, "package.json"), "utf8")
+        ).version
+      ).toBe("0.1.0");
+    }
 
     expect(
       JSON.parse(
@@ -200,5 +233,94 @@ describe("scripts/release-version.mjs", () => {
       ["radius-aws", "1.0.0"]
     ]);
     expect(marketplace.metadata.version).toBe("1.0.0");
+  });
+
+  it("excludes libraries from both all-plugin and selected-plugin plans", () => {
+    const libraries = ["@radius-project/core", "@radius-project/graph-react"];
+    expect(
+      versionPlan(plugins, undefined, undefined, { libraries }).ignore
+    ).toEqual(libraries);
+    expect(versionPlan(plugins, "radius", "edge", { libraries })).toEqual({
+      args: ["version", "--snapshot", "edge"],
+      ignore: ["radius-aws", ...libraries]
+    });
+  });
+
+  it("requires a distinct, non-empty library release scope", () => {
+    expect(() =>
+      versionPlan(plugins, undefined, undefined, { scope: "libraries" })
+    ).toThrow("no public npm libraries");
+    expect(() =>
+      versionPlan(plugins, "radius", undefined, {
+        libraries: ["@radius-project/core"],
+        scope: "libraries"
+      })
+    ).toThrow("--libraries cannot be combined with --plugin");
+  });
+
+  it("discovers public libraries without enrolling internal workspaces or plugins", () => {
+    const root = workspace();
+    mkdirSync(join(root, "packages", "without-manifest"));
+    writeFileSync(join(root, "packages", "not-a-directory"), "");
+    writeJson(join(root, "packages", "unpublished", "package.json"), {
+      name: "unpublished"
+    });
+    expect(libraryNames(root)).toEqual([
+      "@radius-project/core",
+      "@radius-project/graph-react"
+    ]);
+    expect(libraryNames(join(root, "empty"))).toEqual([]);
+  });
+
+  it("versions only libraries and leaves every plugin note and manifest unchanged", () => {
+    const root = workspace();
+    const config = join(root, ".changeset", "config.json");
+    const before = readFileSync(config, "utf8");
+    const result = spawnSync(
+      process.execPath,
+      [join(root, "scripts", "release-version.mjs"), "--libraries"],
+      { cwd: root, encoding: "utf8" }
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(readFileSync(config, "utf8")).toBe(before);
+    for (const name of ["core", "graph-react"]) {
+      expect(existsSync(join(root, ".changeset", `${name}.md`))).toBe(false);
+      expect(
+        JSON.parse(
+          readFileSync(join(root, "packages", name, "package.json"), "utf8")
+        ).version
+      ).toBe("0.2.0");
+    }
+    for (const name of ["radius", "radius-aws"]) {
+      expect(existsSync(join(root, ".changeset", `${name}.md`))).toBe(true);
+      expect(
+        JSON.parse(
+          readFileSync(join(root, "extensions", name, "package.json"), "utf8")
+        ).version
+      ).toBe("1.0.0");
+      expect(
+        JSON.parse(
+          readFileSync(join(root, "plugins", name, "plugin.json"), "utf8")
+        ).version
+      ).toBe("1.0.0");
+    }
+  });
+
+  it("restores release scoping when Changesets rejects a mixed plugin/library note", () => {
+    const root = workspace();
+    const config = join(root, ".changeset", "config.json");
+    const before = readFileSync(config, "utf8");
+    writeFileSync(
+      join(root, ".changeset", "mixed.md"),
+      '---\n"radius": patch\n"@radius-project/core": patch\n---\n\nInvalid mixed release unit.\n'
+    );
+    const result = spawnSync(
+      process.execPath,
+      [join(root, "scripts", "release-version.mjs"), "--plugin", "radius"],
+      { cwd: root, encoding: "utf8" }
+    );
+    expect(result.status).not.toBe(0);
+    expect(readFileSync(config, "utf8")).toBe(before);
+    expect(existsSync(join(root, ".changeset", "mixed.md"))).toBe(true);
   });
 });
