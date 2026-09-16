@@ -748,7 +748,7 @@ test.describe("Radius Canvas in Chromium", () => {
     await page.selectOption("#graph-branch", WORKTREE_BRANCH);
     await expect(page.locator(".rad-node")).toHaveCount(3);
 
-    const panel = page.locator("#node-popup");
+    const panel = page.locator("[data-radius-details]");
     await expect(panel).toBeHidden();
 
     const webCard = page

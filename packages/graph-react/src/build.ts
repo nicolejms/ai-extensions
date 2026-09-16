@@ -1,4 +1,4 @@
-// Canvas adapter — application-graph nodes and edges (BU-04, BU-05).
+// Canonical application-graph nodes and edges (BU-04, BU-05).
 //
 // The pure builder the renderer runs before React ever mounts: it turns the
 // server's resource list into React Flow nodes and edges, resolving each node's
@@ -70,6 +70,7 @@ export const RADIUS_DIFF_STATUS_COLORS: Readonly<Record<string, NodeColors>> = {
 // What a page asks for when it renders a graph. Every field is optional: the
 // modeled, planned, diff and deployed pages each set a different subset.
 export interface GraphOptions {
+  liveMode?: boolean;
   diffMode?: boolean;
   deployMode?: boolean;
   plannedMode?: boolean;
@@ -87,6 +88,7 @@ export interface GraphOptions {
 // The same options with every default already applied, so no downstream module
 // re-derives "planned or deployed means resolved" or "no branch means main".
 export interface GraphSettings {
+  readonly liveMode: boolean;
   readonly diffMode: boolean;
   readonly deployMode: boolean;
   readonly plannedMode: boolean;
@@ -126,6 +128,7 @@ export interface GraphNodeData {
   portalUrl: string;
   cloudId?: string;
   cloudResources: string;
+  provisioningState?: string;
 }
 
 export interface GraphNodePosition {
@@ -186,6 +189,7 @@ export function resolveGraphSettings(
   const deployMode = options.deployMode || false;
   const branch = options.branch || "main";
   return {
+    liveMode: options.liveMode === true,
     diffMode: options.diffMode || false,
     deployMode,
     plannedMode,
@@ -282,8 +286,8 @@ function ownedOutputsOf(resources: readonly GraphResource[]): {
   ownedOutputIds: Record<string, string>;
   diffStatusById: Record<string, string>;
 } {
-  const ownedOutputIds: Record<string, string> = {};
-  const diffStatusById: Record<string, string> = {};
+  const ownedOutputIds: Record<string, string> = Object.create(null);
+  const diffStatusById: Record<string, string> = Object.create(null);
   for (const [index, resource] of resources.entries()) {
     const id = resourceId(resource, index);
     diffStatusById[id] = resource.diffStatus || "";
@@ -300,12 +304,13 @@ export function buildGraph(
   settings: GraphSettings,
   resources: readonly GraphResource[]
 ): BuiltGraph {
-  const visibleResources = parseGraphResources(
-    filterGraphVisualizationResources([...resources])
-  );
+  const visibleResources =
+    settings.liveMode ?
+      [...resources]
+    : parseGraphResources(filterGraphVisualizationResources([...resources]));
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
-  const dataById: Record<string, GraphNodeData> = {};
+  const dataById: Record<string, GraphNodeData> = Object.create(null);
   const edgeSeen = new Set<string>();
   const { ownedOutputIds, diffStatusById } = ownedOutputsOf(visibleResources);
 
@@ -336,8 +341,8 @@ export function buildGraph(
     dashedInput: boolean,
     connectionStatus = ""
   ): void {
-    const id = source + "-->" + target;
-    if (edgeSeen.has(id)) return;
+    const id = JSON.stringify([source, target]);
+    if (source === target || edgeSeen.has(id)) return;
     edgeSeen.add(id);
     const dashed = dashedInput || settings.plannedMode;
     let stroke = dashed ? "var(--rad-edge)" : "var(--rad-edge-muted)";
@@ -351,6 +356,7 @@ export function buildGraph(
   }
 
   function pushNode(id: string, data: Omit<GraphNodeData, "id">): void {
+    if (Object.hasOwn(dataById, id)) return;
     const withId: GraphNodeData = { ...data, id };
     dataById[id] = withId;
     nodes.push({
@@ -399,7 +405,9 @@ export function buildGraph(
       sourceBranch,
       srcPath: srcPathFromRef(resource.codeReference || ""),
       srcLine: srcLineFromRef(resource.codeReference || ""),
-      defFile: resource.definitionFile || ".radius/app.bicep",
+      defFile:
+        resource.definitionFile ||
+        (settings.liveMode ? "" : ".radius/app.bicep"),
       defLine: resource.definitionLine || 0,
       resourceType: resource.type || "",
       diffStatus: resource.diffStatus || "",
@@ -416,7 +424,8 @@ export function buildGraph(
         (resolved?.id?.startsWith("/subscriptions/") ?
           azurePortalUrl(resolved.id)
         : ""),
-      cloudResources: JSON.stringify(cloudOutputsOf(resource))
+      cloudResources: JSON.stringify(cloudOutputsOf(resource)),
+      provisioningState: resource.provisioningState
     });
 
     for (const connection of resource.connections || []) {
@@ -434,7 +443,7 @@ export function buildGraph(
     // The modeled and diff graphs expand concrete recipe outputs as child nodes
     // for detail. Planned and deploying graphs deliberately keep the modeled
     // graph's one-node-per-resource topology.
-    if (settings.resolvedMode) continue;
+    if (settings.resolvedMode || settings.liveMode) continue;
     const outputs = resource.outputResources || [];
     for (let index = 0; index < outputs.length; index++) {
       const output = outputs[index];

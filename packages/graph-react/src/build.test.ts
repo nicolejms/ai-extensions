@@ -138,6 +138,7 @@ describe("options", () => {
   it("applies the defaults the pages rely on", () => {
     const resolved = settings();
     expect(resolved).toEqual({
+      liveMode: false,
       diffMode: false,
       deployMode: false,
       plannedMode: false,
@@ -150,6 +151,51 @@ describe("options", () => {
       edgeType: "default",
       showLegend: false,
       enablePopup: true
+    });
+  });
+
+  describe("source-specific graph topology", () => {
+    it("keeps full live identity and raw status without inventing source or output nodes", () => {
+      const resources = [
+        {
+          id: "/planes/radius/local/resourceGroups/g/providers/Radius.Compute/containerImages/image",
+          name: "image",
+          type: "Radius.Compute/containerImages",
+          provisioningState: "Reconciling",
+          outputResources: [{ id: "/subscriptions/s/resource", name: "child" }]
+        }
+      ];
+      const live = buildGraph(settings({ liveMode: true }), resources);
+      expect(live.nodes).toHaveLength(1);
+      expect(live.nodes[0].data).toMatchObject({
+        id: resources[0].id,
+        provisioningState: "Reconciling",
+        defFile: "",
+        deployStatus: "",
+        deployBadge: "",
+        srcPath: "",
+        sourceUrl: ""
+      });
+      expect(buildGraph(settings(), resources).nodes).toHaveLength(0);
+    });
+
+    it("does not create duplicate or self edges and handles prototype-like IDs as data", () => {
+      const resource = {
+        id: "__proto__",
+        name: "first",
+        connections: [{ id: "__proto__" }, { id: "constructor" }]
+      };
+      const graph = buildGraph(settings(), [
+        resource,
+        resource,
+        { id: "constructor", name: "second" }
+      ]);
+      expect(graph.nodes.map((node) => node.id)).toEqual([
+        "__proto__",
+        "constructor"
+      ]);
+      expect(graph.edges).toHaveLength(1);
+      expect(graph.dataById.__proto__.nodeName).toBe("first");
     });
   });
 
@@ -280,9 +326,9 @@ describe("modeled graph", () => {
   it("connects outbound connections whose target exists and expands outputs", () => {
     const built = buildGraph(settings(), [web, db]);
     expect(built.edges.map((edge) => edge.id)).toEqual([
-      "app/web-->app/db",
-      "app/db-->app/db/output/0/server",
-      "app/db-->app/db/output/1/creds"
+      '["app/web","app/db"]',
+      '["app/db","app/db/output/0/server"]',
+      '["app/db","app/db/output/1/creds"]'
     ]);
     expect(built.edges[0].style).toEqual({
       stroke: "var(--rad-edge-muted)",
@@ -306,7 +352,7 @@ describe("modeled graph", () => {
       },
       { id: "b", name: "b" }
     ]);
-    expect(built.edges.map((edge) => edge.id)).toEqual(["a-->b"]);
+    expect(built.edges.map((edge) => edge.id)).toEqual(['["a","b"]']);
   });
 
   it("names a connection by name when it carries no id", () => {
@@ -314,7 +360,7 @@ describe("modeled graph", () => {
       { name: "a", connections: [{ name: "b" }] },
       { name: "b" }
     ]);
-    expect(built.edges.map((edge) => edge.id)).toEqual(["a-->b"]);
+    expect(built.edges.map((edge) => edge.id)).toEqual(['["a","b"]']);
   });
 
   it("skips an output another resource already owns", () => {
@@ -495,9 +541,9 @@ describe("diff graph", () => {
     const built = buildGraph(settings(base), resources);
     const stroke = (id: string) =>
       built.edges.find((edge) => edge.id === id)?.style.stroke;
-    expect(stroke("a-->b")).toBe("var(--rad-diff-added)");
-    expect(stroke("a-->c")).toBe("var(--rad-diff-removed)");
-    expect(stroke("a-->d")).toBe("var(--rad-edge-muted)");
+    expect(stroke('["a","b"]')).toBe("var(--rad-diff-added)");
+    expect(stroke('["a","c"]')).toBe("var(--rad-diff-removed)");
+    expect(stroke('["a","d"]')).toBe("var(--rad-edge-muted)");
   });
 
   it("falls back to the endpoints' statuses only when the connection has none", () => {
@@ -514,9 +560,9 @@ describe("diff graph", () => {
     ]);
     const stroke = (id: string) =>
       built.edges.find((edge) => edge.id === id)?.style.stroke;
-    expect(stroke("a-->b")).toBe("var(--rad-diff-added)");
-    expect(stroke("c-->b")).toBe("var(--rad-diff-removed)");
-    expect(stroke("d-->b")).toBe("var(--rad-edge-muted)");
+    expect(stroke('["a","b"]')).toBe("var(--rad-diff-added)");
+    expect(stroke('["c","b"]')).toBe("var(--rad-diff-removed)");
+    expect(stroke('["d","b"]')).toBe("var(--rad-edge-muted)");
   });
 
   it("points a removed resource's source and definition links at the base branch", () => {

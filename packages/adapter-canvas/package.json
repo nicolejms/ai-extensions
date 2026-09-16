@@ -33,6 +33,7 @@
   "dependencies": {
     "@radius-project/adapter-shared": "workspace:*",
     "@radius-project/core": "workspace:*",
+    "@radius-project/graph-react": "workspace:*",
     "yaml": "catalog:"
   },
   "devDependencies": {
@@ -40,17 +41,14 @@
     "@github/copilot-sdk": "catalog:",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/user-event": "^14.6.6",
-    "@types/dagre": "^0.7.54",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@vitest/browser": "catalog:",
     "@vitest/browser-playwright": "^4.1.11",
-    "dagre": "0.8.5",
     "esbuild": "^0.28.2",
     "playwright": "^1.62.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
-    "reactflow": "11.11.4",
     "vitest": "catalog:"
   }
 }

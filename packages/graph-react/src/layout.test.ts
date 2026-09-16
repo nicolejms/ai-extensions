@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 import { GRAPH_NODE_HEIGHT, GRAPH_NODE_WIDTH, layoutGraph } from "./layout.js";
 import { buildGraph, resolveGraphSettings } from "./build.js";
-import { createFakeDagre } from "../../../test/support/browser/graph-vendor.js";
+import { createFakeDagre } from "../test/support/dagre.js";
 
 function graph() {
   return buildGraph(resolveGraphSettings(), [
@@ -18,13 +18,18 @@ function graph() {
 }
 
 describe("layoutGraph", () => {
+  it("accepts an empty graph without reporting a missing layout", () => {
+    expect(layoutGraph(createFakeDagre(), [], [])).toBeNull();
+  });
+
   it("lays the graph out top to bottom with the card footprint", () => {
     const dagre = createFakeDagre();
     const built = graph();
     dagre.placements.set("a", { x: 110, y: 59 });
     dagre.placements.set("b", { x: 310, y: 259 });
-
-    layoutGraph(dagre, built.nodes, built.edges);
+    expect(layoutGraph(dagre, built.nodes, built.edges)).toContain(
+      "Layout incomplete"
+    );
 
     expect(dagre.graphs).toHaveLength(1);
     expect(dagre.graphs[0].config).toEqual({
@@ -46,6 +51,38 @@ describe("layoutGraph", () => {
     expect(built.nodes[1].position).toEqual({ x: 200, y: 200 });
     // A node dagre did not place keeps the position it already had.
     expect(built.nodes[2].position).toEqual({ x: 0, y: 0 });
+  });
+
+  it("preserves an unplaced node's existing position without discarding valid placements", () => {
+    const dagre = createFakeDagre();
+    const built = graph();
+    built.nodes[2].position = { x: 75, y: 350 };
+    dagre.placements.set("a", { x: 110, y: 59 });
+    dagre.placements.set("b", { x: 310, y: 259 });
+
+    expect(layoutGraph(dagre, built.nodes, built.edges)).toContain(
+      "Layout incomplete"
+    );
+    expect(built.nodes.map((node) => node.position)).toEqual([
+      { x: 0, y: 0 },
+      { x: 200, y: 200 },
+      { x: 75, y: 350 }
+    ]);
+  });
+
+  it("returns a successful layout when every node has a finite placement", () => {
+    const dagre = createFakeDagre();
+    const built = graph();
+    dagre.placements.set("a", { x: 110, y: 59 });
+    dagre.placements.set("b", { x: 310, y: 259 });
+    dagre.placements.set("c", { x: 510, y: 459 });
+
+    expect(layoutGraph(dagre, built.nodes, built.edges)).toBeNull();
+    expect(built.nodes.map((node) => node.position)).toEqual([
+      { x: 0, y: 0 },
+      { x: 200, y: 200 },
+      { x: 400, y: 400 }
+    ]);
   });
 
   it("skips an edge whose endpoints are not both in the layout", () => {
@@ -83,4 +120,15 @@ describe("layoutGraph", () => {
       { x: 0, y: (GRAPH_NODE_HEIGHT + 48) * 2 }
     ]);
   });
+
+  it.each([undefined, { x: NaN, y: 10 }, { x: 10, y: Infinity }])(
+    "reports a degraded layout rather than retaining an invalid position %j",
+    (placement) => {
+      const dagre = createFakeDagre();
+      const built = graph();
+      if (placement) dagre.placements.set("a", placement);
+      expect(layoutGraph(dagre, built.nodes, built.edges)).toContain("Layout");
+      expect(built.nodes.map((node) => node.position.y)).toEqual([0, 166, 332]);
+    }
+  );
 });
