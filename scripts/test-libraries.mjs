@@ -28,6 +28,7 @@ import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { chromium } from "@playwright/test";
 import { repoRoot } from "./plugins.mjs";
+import { exerciseHostStyling } from "./fixtures/libraries/host-assertions.mjs";
 import {
   validateBuildBoundary,
   validateLibraryManifest,
@@ -203,25 +204,40 @@ function assertInstalledLibrary(consumer, directory, tarball, coreVersion) {
 }
 
 async function exerciseBrowser(consumer) {
+  const pages = {
+    "/": "browser",
+    "/host-styling": "host-styling",
+    "/base-only": "base-only"
+  };
+  const files = {
+    "/browser.js": "text/javascript",
+    "/browser.css": "text/css",
+    "/host-styling.js": "text/javascript",
+    "/host-styling.css": "text/css",
+    "/base-only.js": "text/javascript",
+    "/base-only.css": "text/css",
+    "/host-alternate.css": "text/css"
+  };
   const server = createServer((request, response) => {
-    if (request.url === "/") {
+    if (Object.hasOwn(pages, request.url)) {
+      const entry = pages[request.url];
       response.setHeader("Content-Type", "text/html");
       response.end(
-        '<!doctype html><html lang="en"><title>Packed Radius graph candidate</title><link rel="stylesheet" href="/browser.css"><div id="root" style="width:850px;height:650px"></div><script type="module" src="/browser.js"></script></html>'
+        `<!doctype html><html lang="en"><title>Packed Radius graph candidate</title><link rel="stylesheet" href="/${entry}.css"><div id="root"${entry === "browser" ? ' style="width:850px;height:650px"' : ""}></div><script type="module" src="/${entry}.js"></script></html>`
       );
       return;
     }
-    const files = {
-      "/browser.js": "text/javascript",
-      "/browser.css": "text/css"
-    };
     if (!Object.hasOwn(files, request.url)) {
       response.writeHead(404).end();
       return;
     }
     response.setHeader("Content-Type", files[request.url]);
     response.end(
-      readFileSync(join(consumer, "browser-dist", request.url.slice(1)))
+      readFileSync(
+        request.url === "/host-alternate.css" ?
+          join(consumer, "host-alternate.css")
+        : join(consumer, "browser-dist", request.url.slice(1))
+      )
     );
   });
   await new Promise((resolve, reject) => {
@@ -231,12 +247,23 @@ async function exerciseBrowser(consumer) {
   let browser;
   try {
     browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
+    const page = await browser.newPage({
+      viewport: { width: 1800, height: 950 }
+    });
+    page.setDefaultTimeout(10_000);
     const errors = [];
+    const requests = [];
     page.on("pageerror", (error) => errors.push(error.message));
+    page.on("request", (request) => requests.push(request.url()));
     const address = server.address();
     assert.ok(address && typeof address !== "string");
-    await page.goto(`http://127.0.0.1:${address.port}`);
+    const origin = `http://127.0.0.1:${address.port}`;
+    await page.route("**/*", (route) =>
+      new URL(route.request().url()).origin === origin ?
+        route.continue()
+      : route.abort()
+    );
+    await page.goto(origin);
     const web = page.getByRole("group", { name: "web", exact: true });
     const db = page.getByRole("group", { name: "db", exact: true });
     await web.waitFor();
@@ -284,6 +311,37 @@ async function exerciseBrowser(consumer) {
       ),
       true
     );
+    for (const [path, entry, baseOnly] of [
+      ["/host-styling", "host-styling", false],
+      ["/base-only", "base-only", true]
+    ]) {
+      const start = requests.length;
+      await page.goto(`${origin}${path}`);
+      await exerciseHostStyling(page, baseOnly);
+      const requested = requests.slice(start);
+      assert.ok(requested.includes(`${origin}/${entry}.css`));
+      assert.ok(requested.includes(`${origin}/host-alternate.css`));
+      for (const url of requested) {
+        assert.ok(
+          [
+            `${origin}${path}`,
+            `${origin}/${entry}.js`,
+            `${origin}/${entry}.css`,
+            `${origin}/host-alternate.css`
+          ].includes(url),
+          `The packed ${entry} graph fetched an unexpected asset: ${url}`
+        );
+      }
+    }
+    for (const url of requests) {
+      const request = new URL(url);
+      assert.equal(request.origin, origin, `Unexpected remote asset: ${url}`);
+      assert.ok(
+        Object.hasOwn(pages, request.pathname) ||
+          Object.hasOwn(files, request.pathname),
+        `Unexpected runtime fetch: ${url}`
+      );
+    }
     assert.deepEqual(errors, []);
   } finally {
     if (browser) await browser.close();
@@ -304,6 +362,10 @@ try {
   const graphManifest = readJson(join(graphRoot, "package.json"));
   validateStylesheetBoundary(
     readJson(join(artifacts, "graph-react-css-build.json"))
+  );
+  validateStylesheetBoundary(
+    readJson(join(artifacts, "graph-react-base-css-build.json")),
+    "base.css"
   );
   for (const [directory, root] of [
     ["core", coreRoot],
@@ -404,22 +466,41 @@ try {
       readFileSync(join(installedCore, "dist", "graph", "index.js"), "utf8"),
       readFileSync(join(coreRoot, "dist", "graph", "index.js"), "utf8")
     );
-    assert.equal(
-      readFileSync(
-        consumerRequire.resolve("@radius-project/graph-react/styles.css"),
-        "utf8"
-      ),
-      readFileSync(join(graphRoot, "dist", "styles.css"), "utf8")
+    assert.deepEqual(
+      readdirSync(join(installedGraph, "dist"))
+        .filter((file) => file.endsWith(".css"))
+        .sort(),
+      ["base.css", "styles.css"]
     );
+    for (const stylesheet of ["base.css", "styles.css"]) {
+      assert.deepEqual(
+        readFileSync(
+          consumerRequire.resolve(`@radius-project/graph-react/${stylesheet}`)
+        ),
+        readFileSync(join(graphRoot, "dist", stylesheet)),
+        `Installed ${stylesheet} must match the built candidate byte-for-byte`
+      );
+    }
     for (const file of [
       "consumer.ts",
       "runtime.mjs",
       "browser.mjs",
-      "resolution.mjs"
+      "resolution.mjs",
+      "host-renderer.mjs",
+      "host-styling.mjs",
+      "base-only.mjs",
+      "host.css",
+      "host-alternate.css"
     ]) {
       copyFileSync(
         join(repoRoot, "scripts", "fixtures", "libraries", file),
         join(consumer, file)
+      );
+    }
+    for (const file of ["host.css", "host-alternate.css"]) {
+      assert.doesNotMatch(
+        readFileSync(join(consumer, file), "utf8"),
+        /!important\b/i
       );
     }
     run(
@@ -468,28 +549,49 @@ try {
         `Workspace declarations leaked into consumer: ${file}`
       );
     }
-    const bundled = await build({
-      absWorkingDir: consumer,
-      entryPoints: ["browser.mjs"],
-      outdir: join(consumer, "browser-dist"),
-      bundle: true,
-      format: "esm",
-      platform: "browser",
-      target: "es2022",
-      metafile: true
-    });
-    for (const input of Object.keys(bundled.metafile.inputs)) {
-      assert.ok(
-        resolve(consumer, input).startsWith(`${consumer}${sep}`),
-        `Workspace resolution leaked into consumer: ${input}`
+    for (const entry of ["browser", "host-styling", "base-only"]) {
+      const bundled = await build({
+        absWorkingDir: consumer,
+        entryPoints: [`${entry}.mjs`],
+        outdir: join(consumer, "browser-dist"),
+        bundle: true,
+        format: "esm",
+        platform: "browser",
+        target: "es2022",
+        metafile: true
+      });
+      const inputs = Object.keys(bundled.metafile.inputs);
+      for (const input of inputs) {
+        assert.ok(
+          resolve(consumer, input).startsWith(`${consumer}${sep}`),
+          `Workspace resolution leaked into consumer: ${input}`
+        );
+      }
+      const css = readFileSync(
+        join(consumer, "browser-dist", `${entry}.css`),
+        "utf8"
       );
+      assert.match(css, /\.radius-graph/);
+      assert.match(css, /\.react-flow/);
+      assert.doesNotMatch(css, /@import\b/);
+      if (entry === "base-only") {
+        assert.ok(
+          inputs.some((input) =>
+            input.replaceAll("\\", "/").endsWith("/graph-react/dist/base.css")
+          )
+        );
+        assert.equal(
+          inputs.some((input) =>
+            /\/graph-react\/dist\/(?:styles|theme)\.css$/.test(
+              input.replaceAll("\\", "/")
+            )
+          ),
+          false,
+          "The base-only consumer must not bundle the default skin"
+        );
+        assert.doesNotMatch(css, /@scope\b/);
+      }
     }
-    const css = readFileSync(
-      join(consumer, "browser-dist", "browser.css"),
-      "utf8"
-    );
-    assert.match(css, /\.radius-graph/);
-    assert.match(css, /\.react-flow/);
     await exerciseBrowser(consumer);
     writeJson(join(artifacts, `react-${major}-smoke.json`), {
       react: overrides.get("react").manifest.version,
@@ -500,6 +602,8 @@ try {
       browserBundle: "passed",
       chromiumComponent: "passed",
       css: "passed",
+      hostStylesheetIsolation: "passed",
+      baseOnlyRenderer: "passed",
       peers: "passed",
       installedTarballIntegrity: "verified",
       offline: true

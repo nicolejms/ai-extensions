@@ -8,7 +8,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./presentation": "./src/presentation.ts",
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./base.css": "./src/base.css"
   },
   "files": [
     "dist"
@@ -32,6 +33,7 @@
         "default": "./dist/presentation.js"
       },
       "./styles.css": "./dist/styles.css",
+      "./base.css": "./dist/base.css",
       "./package.json": "./package.json"
     }
   },

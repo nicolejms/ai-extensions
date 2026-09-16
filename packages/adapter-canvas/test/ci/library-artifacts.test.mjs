@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { build } from "esbuild";
 import { describe, expect, it } from "vitest";
 import {
   validateBuildBoundary,
@@ -22,6 +24,7 @@ function manifest() {
         import: "./dist/presentation.js",
         default: "./dist/presentation.js"
       },
+      "./base.css": "./dist/base.css",
       "./styles.css": "./dist/styles.css",
       "./package.json": "./package.json"
     },
@@ -39,20 +42,85 @@ function manifest() {
 }
 
 describe("packed library contracts", () => {
-  it("bundles the package and React Flow styles without remote assets", () => {
+  it.each(["styles.css", "base.css"])(
+    "bundles %s and React Flow styles without remote assets",
+    (entry) => {
+      expect(() =>
+        validateStylesheetBoundary(
+          {
+            inputs: {
+              [`src\\${entry}`]: {},
+              "src/base.css": {},
+              "../../node_modules/reactflow/dist/style.css": {}
+            },
+            outputs: {
+              [`dist/${entry}`]: {
+                imports: [{ path: "data:image/svg+xml,<svg/>", external: true }]
+              }
+            }
+          },
+          entry
+        )
+      ).not.toThrow();
+    }
+  );
+
+  it.each(["styles.css", "base.css"])(
+    "builds the real %s as one self-contained public stylesheet",
+    async (entry) => {
+      const result = await build({
+        absWorkingDir: fileURLToPath(
+          new URL("../../../graph-react/", import.meta.url)
+        ),
+        entryPoints: [`src/${entry}`],
+        outfile: `dist/${entry}`,
+        bundle: true,
+        write: false,
+        target: "es2022",
+        metafile: true
+      });
+      expect(() =>
+        validateStylesheetBoundary(result.metafile, entry)
+      ).not.toThrow();
+      expect(result.outputFiles).toHaveLength(1);
+      const css = result.outputFiles[0].text;
+      expect(css).toContain(".react-flow__handle");
+      expect(css).toContain(".radius-graph");
+      expect(css).not.toMatch(/@import\b/);
+      if (entry === "base.css") {
+        expect(Object.keys(result.metafile.inputs)).not.toContain(
+          "src/theme.css"
+        );
+        expect(css).not.toMatch(/@scope\b/);
+      } else {
+        expect(Object.keys(result.metafile.inputs)).toEqual(
+          expect.arrayContaining([
+            "src/base.css",
+            "src/theme.css",
+            "src/styles.css"
+          ])
+        );
+        expect(css).toMatch(/@scope\b/);
+      }
+    }
+  );
+
+  it.each(["src/styles.css", "src/theme.css"])(
+    "rejects the default skin input %s from a base-only build",
+    (input) => {
+      expect(() =>
+        validateStylesheetBoundary(
+          { inputs: { [input]: {} }, outputs: {} },
+          "base.css"
+        )
+      ).toThrow("Unexpected stylesheet input");
+    }
+  );
+
+  it("rejects attempts to build the skin as a public entry", () => {
     expect(() =>
-      validateStylesheetBoundary({
-        inputs: {
-          "src/styles.css": {},
-          "../../node_modules/reactflow/dist/style.css": {}
-        },
-        outputs: {
-          "dist/styles.css": {
-            imports: [{ path: "data:image/svg+xml,<svg/>", external: true }]
-          }
-        }
-      })
-    ).not.toThrow();
+      validateStylesheetBoundary({ inputs: {}, outputs: {} }, "theme.css")
+    ).toThrow("Unknown public stylesheet");
   });
 
   it("rejects unexpected stylesheet implementations", () => {
@@ -78,6 +146,25 @@ describe("packed library contracts", () => {
       })
     ).toThrow("must not fetch an external asset");
   });
+
+  it.each(["base.css", "styles.css"])(
+    "rejects a leftover local skin fetch in %s",
+    (entry) => {
+      expect(() =>
+        validateStylesheetBoundary(
+          {
+            inputs: { [`src/${entry}`]: {} },
+            outputs: {
+              [`dist/${entry}`]: {
+                imports: [{ path: "./theme.css", external: true }]
+              }
+            }
+          },
+          entry
+        )
+      ).toThrow("must not fetch an external asset");
+    }
+  );
 
   it("accepts compiled, licensed graph exports and exact candidate core dependencies", () => {
     expect(() =>
@@ -159,6 +246,24 @@ describe("packed library contracts", () => {
       "missing stylesheet",
       (value) => {
         delete value.exports["./styles.css"];
+      }
+    ],
+    [
+      "missing base stylesheet",
+      (value) => {
+        delete value.exports["./base.css"];
+      }
+    ],
+    [
+      "source base stylesheet",
+      (value) => {
+        value.exports["./base.css"] = "./src/base.css";
+      }
+    ],
+    [
+      "separate theme export",
+      (value) => {
+        value.exports["./theme.css"] = "./dist/theme.css";
       }
     ],
     [

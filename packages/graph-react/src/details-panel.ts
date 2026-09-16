@@ -6,13 +6,8 @@
 // survives a host re-render and a row's destination lives in a closure rather
 // than in a data attribute that page script could rewrite.
 //
-// The inline styles are the panel's incumbent appearance, kept here verbatim so
-// the extracted library renders exactly like the Canvas panel it replaces. They
-// stay inline rather than moving to `styles.css` because the panel must look
-// the same in a host that does not load the stylesheet.
-
 import { createElement as h } from "react";
-import type { CSSProperties, MouseEvent, ReactElement, ReactNode } from "react";
+import type { MouseEvent, ReactElement, ReactNode } from "react";
 import type { DetailIcon, DetailRow } from "./details.js";
 
 // Monochrome octicon glyphs (currentColor) so links match the flat white-card
@@ -25,52 +20,6 @@ const ICON_PATHS: Readonly<Record<DetailIcon, string>> = {
     "m11.28 3.22 4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.275-.326.749.749 0 0 1 .215-.734L13.94 8l-3.72-3.72a.749.749 0 0 1 .326-1.275.749.749 0 0 1 .734.215Zm-6.56 0a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L2.06 8l3.72 3.72a.749.749 0 0 1-.326 1.275.749.749 0 0 1-.734-.215L.47 8.53a.75.75 0 0 1 0-1.06Z"
 };
 
-export const PANEL_STYLE: CSSProperties = {
-  position: "absolute",
-  zIndex: 1000,
-  background: "var(--rad-surface)",
-  color: "var(--rad-text)",
-  border: "1px solid var(--rad-stroke)",
-  borderRadius: "8px",
-  padding: "6px 8px",
-  boxShadow: "0 4px 12px var(--rad-shadow)",
-  fontSize: "13px",
-  minWidth: "220px",
-  maxWidth: "380px",
-  fontFamily: "var(--rad-font)"
-};
-
-const ROW_STYLE: CSSProperties = { padding: "6px 4px" };
-const LINK_STYLE: CSSProperties = {
-  color: "var(--rad-link)",
-  textDecoration: "none",
-  fontWeight: 500,
-  display: "flex",
-  alignItems: "center",
-  gap: "6px",
-  fontSize: "13px"
-};
-const SUBTITLE_STYLE: CSSProperties = {
-  color: "var(--rad-text-tertiary)",
-  fontSize: "11px",
-  marginTop: "2px",
-  marginLeft: "20px",
-  wordBreak: "break-all"
-};
-const MESSAGE_STYLE: CSSProperties = {
-  padding: "6px 4px",
-  fontSize: "12px",
-  lineHeight: 1.5,
-  borderBottom: "1px solid var(--rad-stroke,#d1d9e0)",
-  marginBottom: "4px",
-  wordBreak: "break-word"
-};
-const EMPTY_STYLE: CSSProperties = {
-  padding: "6px 4px",
-  color: "var(--rad-text-tertiary)",
-  fontSize: "12px"
-};
-
 function icon(name: DetailIcon): ReactElement {
   return h(
     "svg",
@@ -80,14 +29,14 @@ function icon(name: DetailIcon): ReactElement {
       viewBox: "0 0 16 16",
       fill: "currentColor",
       "aria-hidden": true,
-      style: { flex: "none" }
+      "data-radius-part": "details-icon"
     },
     h("path", { d: ICON_PATHS[name] })
   );
 }
 
 function subtitle(text: string): ReactElement {
-  return h("div", { style: SUBTITLE_STYLE }, text);
+  return h("div", { "data-radius-part": "details-subtitle" }, text);
 }
 
 export interface DetailsOverlayProps {
@@ -112,36 +61,35 @@ function renderRow(
     case "summary":
       return h(
         "dl",
-        { key },
+        { key, "data-radius-part": "details-summary" },
         h("dt", null, "Resource"),
         h("dd", null, row.name),
         h("dt", null, "Type"),
         h("dd", null, row.type)
       );
     case "status":
-      return h("div", { key }, `Provisioning status: ${row.state}`);
+      return h(
+        "div",
+        { key, "data-radius-part": "details-status" },
+        `Provisioning status: ${row.state}`
+      );
     case "message":
       return h(
         "div",
         {
           key,
-          style: {
-            ...MESSAGE_STYLE,
-            color:
-              row.failure ?
-                "var(--rad-danger,#cf222e)"
-              : "var(--rad-text-secondary)"
-          }
+          "data-radius-part": "details-message",
+          "data-radius-failure": row.failure
         },
         row.text
       );
     case "inert":
       return h(
         "div",
-        { key, style: ROW_STYLE },
+        { key, "data-radius-part": "details-row" },
         h(
           "span",
-          { "aria-disabled": "true", style: LINK_STYLE },
+          { "aria-disabled": "true", "data-radius-part": "details-link" },
           icon(row.icon),
           h("span", null, row.label)
         )
@@ -149,14 +97,14 @@ function renderRow(
     case "external":
       return h(
         "div",
-        { key, style: ROW_STYLE },
+        { key, "data-radius-part": "details-row" },
         h(
           "a",
           {
             href: row.href,
             target: "_blank",
             rel: "noopener noreferrer",
-            style: LINK_STYLE,
+            "data-radius-part": "details-link",
             onClick: (event: MouseEvent) => {
               // Without a host capability the anchor stays a real link, which
               // is what a plain web host wants.
@@ -173,14 +121,14 @@ function renderRow(
     case "local":
       return h(
         "div",
-        { key, style: ROW_STYLE },
+        { key, "data-radius-part": "details-row" },
         h(
           "a",
           {
             // The remote fallback is also the href so the row stays a real
             // link: copyable, and usable when the host cannot open files.
             href: row.fallbackUrl || "#",
-            style: LINK_STYLE,
+            "data-radius-part": "details-link",
             onClick: (event: MouseEvent) => {
               if (!props.onOpenLocalSource) return;
               event.preventDefault();
@@ -193,7 +141,11 @@ function renderRow(
         subtitle(row.path + (row.line ? ":" + row.line : ""))
       );
     default:
-      return h("div", { key, style: EMPTY_STYLE }, "No links available.");
+      return h(
+        "div",
+        { key, "data-radius-part": "details-empty" },
+        "No links available."
+      );
   }
 }
 
@@ -208,8 +160,8 @@ export function DetailsOverlay(props: DetailsOverlayProps): ReactElement {
     {
       id: props.id,
       "data-radius-details": "",
+      "data-radius-part": "details",
       style: {
-        ...PANEL_STYLE,
         left: props.left,
         top: props.top,
         display: props.open ? undefined : "none"

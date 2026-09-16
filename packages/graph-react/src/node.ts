@@ -6,7 +6,7 @@ import {
   useRef
 } from "react";
 import { Handle, Position } from "reactflow";
-import type { ReactElement, ReactNode, MouseEvent } from "react";
+import type { CSSProperties, ReactElement, ReactNode, MouseEvent } from "react";
 import type { NodeProps } from "reactflow";
 import { isLocalSourceNode } from "./build.js";
 import { safeExternalUrl } from "./external-url.js";
@@ -15,6 +15,7 @@ import type { GraphNodeData, GraphSettings } from "./build.js";
 import type { GraphCallbacks } from "./callbacks.js";
 
 export interface NodeInteraction {
+  appearance?: "default" | "custom";
   settings: GraphSettings;
   callbacks: GraphCallbacks;
   showDetails(node: GraphNodeData, card: HTMLElement, toggle: boolean): void;
@@ -44,12 +45,15 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
   const interaction = useContext(NodeInteractionContext);
   if (!interaction)
     throw new Error("ResourceNode must be rendered inside RadiusGraph.");
-  const { settings, callbacks, showDetails } = interaction;
+  const { settings, callbacks, showDetails, appearance } = interaction;
   const cardRef = useRef<HTMLDivElement>(null);
   const typeRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (typeRef.current) fitTypeLabel(typeRef.current);
-  }, [data.typeLabel]);
+    if (typeRef.current) {
+      if (appearance === "custom") typeRef.current.style.fontSize = "";
+      else fitTypeLabel(typeRef.current);
+    }
+  }, [data.typeLabel, appearance]);
 
   const glyph = h("span", { className: "rad-node__source-glyph" }, "</>");
   const label = h("span", null, "View source code");
@@ -62,6 +66,7 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
         "a",
         {
           className: "rad-node__source nodrag nopan nokey",
+          "data-radius-part": "source",
           href: sourceUrl || "#",
           onClick: (event: MouseEvent) => {
             event.preventDefault();
@@ -84,6 +89,7 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
         "a",
         {
           className: "rad-node__source nodrag nopan nokey",
+          "data-radius-part": "source",
           href: sourceUrl,
           target: "_blank",
           rel: "noopener noreferrer",
@@ -103,10 +109,10 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
         "span",
         {
           className: "rad-node__source",
+          "data-radius-part": "source",
           role: "button",
           "aria-disabled": "true",
-          title: "No source reference found",
-          style: { opacity: 0.5, cursor: "default" }
+          title: "No source reference found"
         },
         glyph,
         label
@@ -118,6 +124,7 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
     data.deployBadge ?
       h("img", {
         className: "rad-node__badge",
+        "data-radius-part": "badge",
         src: data.deployBadge,
         alt:
           data.deployBadgeKind === "failed" ? "Failed"
@@ -132,17 +139,31 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
         badge ? "rad-node__head rad-node__head--with-badge" : "rad-node__head"
     },
     data.icon ?
-      h("img", { className: "rad-node__icon", src: data.icon, alt: "" })
+      h("img", {
+        className: "rad-node__icon",
+        src: data.icon,
+        alt: "",
+        "data-radius-part": "icon"
+      })
     : null,
     h(
       "span",
-      { className: "rad-node__title", title: data.nodeName },
+      {
+        className: "rad-node__title",
+        title: data.nodeName,
+        "data-radius-part": "node-title"
+      },
       data.nodeName
     )
   );
   const type = h(
     "div",
-    { className: "rad-node__type", ref: typeRef, title: data.typeLabel },
+    {
+      className: "rad-node__type",
+      ref: typeRef,
+      title: data.typeLabel,
+      "data-radius-part": "node-type"
+    },
     data.typeLabel
   );
   const portalUrl = settings.deployMode ? safeExternalUrl(data.portalUrl) : "";
@@ -180,13 +201,17 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
         role: "group",
         "aria-label": data.nodeName,
         "data-node-id": data.id,
+        "data-radius-part": "node",
+        "data-radius-diff": data.diffStatus,
+        "data-radius-deploy": data.deployStatus,
+        "data-radius-provisioning": data.provisioningState,
         style: {
-          boxSizing: "border-box",
-          background: data.bgColor,
-          borderStyle: data.borderStyle || "solid",
-          borderWidth: data.borderWidth + "px",
-          borderColor: data.borderColor
-        },
+          "--rad-node-default-background": data.bgColor,
+          "--rad-node-default-border-style": data.borderStyle || "solid",
+          "--rad-node-default-border-width": data.borderWidth + "px",
+          "--rad-node-default-border-color": data.borderColor
+        } satisfies CSSProperties &
+          Record<`--rad-node-default-${string}`, string>,
         onClick: (event: MouseEvent<HTMLDivElement>) =>
           showDetails(data, event.currentTarget, false)
       },
@@ -196,6 +221,7 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
           {
             type: "button",
             className: "rad-node__dots nodrag nopan nokey",
+            "data-radius-part": "details-toggle",
             "aria-label": "Show details",
             onClick: (event: MouseEvent) => {
               event.preventDefault();
@@ -214,6 +240,7 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
           "div",
           {
             className: "rad-node__status",
+            "data-radius-part": "status",
             "aria-label": `Provisioning status: ${data.provisioningState}`
           },
           data.provisioningState
@@ -225,6 +252,7 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
           {
             type: "button",
             className: "rad-node__source nodrag nopan nokey",
+            "data-radius-part": "navigate",
             onClick: (event: MouseEvent) => {
               event.stopPropagation();
               callbacks.onNavigate?.(data);

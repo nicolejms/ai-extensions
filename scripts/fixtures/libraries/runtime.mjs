@@ -37,6 +37,7 @@ for (const hidden of [
   "@radius-project/core",
   "@radius-project/core/modeling",
   "@radius-project/core/src/graph/index.ts",
+  "@radius-project/graph-react/theme.css",
   "@radius-project/graph-react/src/index.ts"
 ]) {
   assert.throws(() => require.resolve(hidden), {

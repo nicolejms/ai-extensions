@@ -84,7 +84,7 @@ describe("category legend", () => {
       { name: "Other", icon: "" }
     ]);
     expect(html).toContain('<img src="data:image/svg+xml,icon"');
-    expect(html).toContain('<span style="display:inline-block;width:14px');
+    expect(html).toContain('<span data-radius-part="legend-icon"></span>');
     expect(html.split('class="legend-item"').length - 1).toBe(2);
   });
 

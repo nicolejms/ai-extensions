@@ -9,6 +9,7 @@ const publicExports = {
   "@radius-project/graph-react": {
     ".": "./dist/index",
     "./presentation": "./dist/presentation",
+    "./base.css": "./dist/base.css",
     "./styles.css": "./dist/styles.css",
     "./package.json": "./package.json"
   }
@@ -27,7 +28,7 @@ export function validateLibraryManifest(manifest, name, coreVersion) {
     Object.keys(expected).sort()
   );
   for (const [subpath, target] of Object.entries(expected)) {
-    if (subpath === "./styles.css" || subpath === "./package.json") {
+    if (subpath.endsWith(".css") || subpath === "./package.json") {
       assert.equal(manifest.exports[subpath], target);
     } else {
       assert.deepEqual(manifest.exports[subpath], {
@@ -81,11 +82,20 @@ export function validateBuildBoundary(metafile, directory) {
   }
 }
 
-export function validateStylesheetBoundary(metafile) {
+export function validateStylesheetBoundary(metafile, entry = "styles.css") {
+  assert.ok(
+    entry === "base.css" || entry === "styles.css",
+    `Unknown public stylesheet: ${entry}`
+  );
+  const allowed = new Set(
+    entry === "base.css" ?
+      ["src/base.css"]
+    : ["src/styles.css", "src/base.css", "src/theme.css"]
+  );
   for (const input of Object.keys(metafile.inputs)) {
     const path = input.replaceAll("\\", "/");
     assert.ok(
-      path === "src/styles.css" || path.endsWith("/reactflow/dist/style.css"),
+      allowed.has(path) || path.endsWith("/reactflow/dist/style.css"),
       `Unexpected stylesheet input: ${input}`
     );
   }

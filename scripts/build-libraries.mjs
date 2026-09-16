@@ -56,18 +56,27 @@ for (const { directory, entries } of packages) {
   );
   await copyFile(join(repoRoot, "LICENSE"), join(outdir, "LICENSE"));
   if (directory === "graph-react") {
-    const stylesheet = await build({
-      absWorkingDir: root,
-      entryPoints: ["src/styles.css"],
-      outfile: join(outdir, "styles.css"),
-      bundle: true,
-      target: "es2022",
-      metafile: true
-    });
-    validateStylesheetBoundary(stylesheet.metafile);
-    await writeFile(
-      join(repoRoot, ".artifacts", "libraries", "graph-react-css-build.json"),
-      `${JSON.stringify(stylesheet.metafile, null, 2)}\n`
-    );
+    for (const entry of ["base.css", "styles.css"]) {
+      const stylesheet = await build({
+        absWorkingDir: root,
+        entryPoints: [`src/${entry}`],
+        outfile: join(outdir, entry),
+        bundle: true,
+        target: "es2022",
+        metafile: true
+      });
+      validateStylesheetBoundary(stylesheet.metafile, entry);
+      await writeFile(
+        join(
+          repoRoot,
+          ".artifacts",
+          "libraries",
+          entry === "base.css" ?
+            "graph-react-base-css-build.json"
+          : "graph-react-css-build.json"
+        ),
+        `${JSON.stringify(stylesheet.metafile, null, 2)}\n`
+      );
+    }
   }
 }
