@@ -10,7 +10,7 @@ Radius clients should present the same resources and relationships consistently.
 
 Introduce common graph contracts and React components owned by `ai-extensions`. Clients reuse one normalization and rendering pipeline, supplying only their data, theme, and host-specific actions. This reduces code duplication and makes a graph improvement available to every consumer through a versioned library update. Consistency means shared visual language and interaction rules, not pretending that live inventory and modeled topology contain the same information.
 
-Potential consumers include the Copilot Canvas extension and the Radius Dashboard, whether running as a standalone application or as a plugin in an existing Backstage installation. Both dashboard modes could use the same graph libraries while retaining their host's navigation, authentication, and page composition.
+Potential consumers include the Copilot Canvas extension, Aspire, and the Radius Dashboard, whether running as a standalone application or as a plugin in an existing Backstage installation. Both dashboard modes could use the same graph libraries while retaining their host's navigation, authentication, and page composition. An Aspire integration could consume the common contracts and mount the shared React graph through a host adapter, subject to the same compatibility and client-journey qualification.
 
 ## Terms and definitions
 
@@ -40,7 +40,7 @@ A Canvas user retains graph navigation, source actions, deployment/diff presenta
 
 #### User story 2
 
-A developer moves between Radius Dashboard, running standalone or as a Backstage plugin, and the Copilot Canvas extension and recognizes the same resource cards, zoom controls, and details interactions. Each client supplies its own navigation actions without copying graph code.
+A developer moves between Radius Dashboard, running standalone or as a Backstage plugin, Aspire, and the Copilot Canvas extension and recognizes the same resource cards, zoom controls, and details interactions. Each client supplies its own navigation actions without copying graph code.
 
 ## User experience (if applicable)
 
@@ -66,9 +66,11 @@ Arrows mean build-time dependency, not network traffic.
 flowchart TD
     Canvas["Canvas host adapter"] --> Graph["graph-react: shared React UI"]
     Dashboard["Dashboard or other React client"] -. npm .-> Graph
+    Aspire["Aspire host adapter"] -. npm .-> Graph
     Graph --> Core["core: browser-safe domain and graph"]
     Canvas --> Core
     Dashboard -. npm .-> Core
+    Aspire -. npm .-> Core
 ```
 
 ### Detailed design
