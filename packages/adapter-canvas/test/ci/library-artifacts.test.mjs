@@ -6,12 +6,13 @@ import {
   libraryExternalImports,
   validateBuildBoundary,
   validateLibraryManifest,
-  validateStylesheetBoundary
+  validateStylesheetBoundary,
 } from "../../../../scripts/library-artifacts.mjs";
 import {
   expectedScopedFlowStyles,
+  renameKeyframes,
   scopeFlowStyles,
-  scopedFlowStylesPath
+  scopedFlowStylesPath,
 } from "../../../../scripts/graph-vendor-styles.mjs";
 
 function manifest() {
@@ -21,32 +22,32 @@ function manifest() {
     license: "Apache-2.0",
     type: "module",
     typesVersions: {
-      "*": { presentation: ["dist/presentation.d.ts"] }
+      "*": { presentation: ["dist/presentation.d.ts"] },
     },
     exports: {
       ".": {
         types: "./dist/index.d.ts",
         import: "./dist/index.js",
-        default: "./dist/index.js"
+        default: "./dist/index.js",
       },
       "./presentation": {
         types: "./dist/presentation.d.ts",
         import: "./dist/presentation.js",
-        default: "./dist/presentation.js"
+        default: "./dist/presentation.js",
       },
       "./base.css": "./dist/base.css",
       "./styles.css": "./dist/styles.css",
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
     },
     dependencies: {
       "@radius-project/core": "0.1.0",
-      reactflow: "11.11.4"
+      reactflow: "11.11.4",
     },
     peerDependencies: {
       react: "^18.3.1 || ^19.2.8",
-      "react-dom": "^18.3.1 || ^19.2.8"
+      "react-dom": "^18.3.1 || ^19.2.8",
     },
-    sideEffects: ["**/*.css"]
+    sideEffects: ["**/*.css"],
   };
 }
 
@@ -61,19 +62,57 @@ describe("packed library contracts", () => {
     expect(css).not.toMatch(/@(?:-webkit-)?keyframes dashdraw/);
   });
 
+  it("renames every prefixed vendor keyframe declaration and reference", () => {
+    expect(
+      renameKeyframes(
+        "@keyframes dashdraw{from{stroke-dashoffset:10}}\n" +
+          "@-webkit-keyframes dashdraw{from{stroke-dashoffset:10}}\n" +
+          ".edge{-webkit-animation:dashdraw 0.5s linear infinite;animation:dashdraw 0.5s linear infinite}",
+        "dashdraw",
+        "radius-graph-dashdraw",
+      ),
+    ).toBe(
+      "@keyframes radius-graph-dashdraw{from{stroke-dashoffset:10}}\n" +
+        "@-webkit-keyframes radius-graph-dashdraw{from{stroke-dashoffset:10}}\n" +
+        ".edge{-webkit-animation:radius-graph-dashdraw 0.5s linear infinite;animation:radius-graph-dashdraw 0.5s linear infinite}",
+    );
+  });
+
+  it.each([
+    [
+      "an unreviewed use outside a keyframe or animation",
+      "@keyframes dashdraw{}\n.edge{animation:dashdraw 1s}\n.dashdraw-legacy{color:red}",
+      "Unreviewed dashdraw occurrence",
+    ],
+    [
+      "a missing declaration",
+      ".edge{animation:dashdraw 1s}",
+      "Expected a dashdraw keyframes declaration",
+    ],
+    [
+      "a missing reference",
+      "@keyframes dashdraw{}",
+      "Expected a dashdraw animation reference",
+    ],
+  ])("refuses to rewrite a vendor update with %s", (_reason, css, message) => {
+    expect(() =>
+      renameKeyframes(css, "dashdraw", "radius-graph-dashdraw"),
+    ).toThrow(message);
+  });
+
   it.each(['@import "external.css";', "@font-face { font-family: other; }"])(
     "rejects unreviewed global vendor inputs: %s",
     (css) => {
       expect(() => scopeFlowStyles(css, "MIT")).toThrow();
-    }
+    },
   );
 
   it("rejects accidentally bundling the unscoped vendor stylesheet", () => {
     expect(() =>
       validateStylesheetBoundary({
         inputs: { "../../node_modules/reactflow/dist/style.css": {} },
-        outputs: {}
-      })
+        outputs: {},
+      }),
     ).toThrow("Unexpected stylesheet input");
   });
 
@@ -86,18 +125,20 @@ describe("packed library contracts", () => {
             inputs: {
               [`src\\${entry}`]: {},
               "src/base.css": {},
-              "src/flow.css": {}
+              "src/flow.css": {},
             },
             outputs: {
               [`dist/${entry}`]: {
-                imports: [{ path: "data:image/svg+xml,<svg/>", external: true }]
-              }
-            }
+                imports: [
+                  { path: "data:image/svg+xml,<svg/>", external: true },
+                ],
+              },
+            },
           },
-          entry
-        )
+          entry,
+        ),
       ).not.toThrow();
-    }
+    },
   );
 
   it.each(["styles.css", "base.css"])(
@@ -105,17 +146,17 @@ describe("packed library contracts", () => {
     async (entry) => {
       const result = await build({
         absWorkingDir: fileURLToPath(
-          new URL("../../../graph-react/", import.meta.url)
+          new URL("../../../graph-react/", import.meta.url),
         ),
         entryPoints: [`src/${entry}`],
         outfile: `dist/${entry}`,
         bundle: true,
         write: false,
         target: "es2022",
-        metafile: true
+        metafile: true,
       });
       expect(() =>
-        validateStylesheetBoundary(result.metafile, entry)
+        validateStylesheetBoundary(result.metafile, entry),
       ).not.toThrow();
       expect(result.outputFiles).toHaveLength(1);
       const css = result.outputFiles[0].text;
@@ -125,7 +166,7 @@ describe("packed library contracts", () => {
       expect(css).toMatch(/@scope\s*\(\.radius-graph\)/);
       if (entry === "base.css") {
         expect(Object.keys(result.metafile.inputs)).not.toContain(
-          "src/theme.css"
+          "src/theme.css",
         );
         expect(css).not.toContain('data-radius-appearance="default"');
       } else {
@@ -133,12 +174,12 @@ describe("packed library contracts", () => {
           expect.arrayContaining([
             "src/base.css",
             "src/theme.css",
-            "src/styles.css"
-          ])
+            "src/styles.css",
+          ]),
         );
         expect(css).toMatch(/@scope\b/);
       }
-    }
+    },
   );
 
   it.each(["src/styles.css", "src/theme.css"])(
@@ -147,15 +188,15 @@ describe("packed library contracts", () => {
       expect(() =>
         validateStylesheetBoundary(
           { inputs: { [input]: {} }, outputs: {} },
-          "base.css"
-        )
+          "base.css",
+        ),
       ).toThrow("Unexpected stylesheet input");
-    }
+    },
   );
 
   it("rejects attempts to build the skin as a public entry", () => {
     expect(() =>
-      validateStylesheetBoundary({ inputs: {}, outputs: {} }, "theme.css")
+      validateStylesheetBoundary({ inputs: {}, outputs: {} }, "theme.css"),
     ).toThrow("Unknown public stylesheet");
   });
 
@@ -163,8 +204,8 @@ describe("packed library contracts", () => {
     expect(() =>
       validateStylesheetBoundary({
         inputs: { "../other/styles.css": {} },
-        outputs: {}
-      })
+        outputs: {},
+      }),
     ).toThrow("Unexpected stylesheet input");
   });
 
@@ -175,11 +216,11 @@ describe("packed library contracts", () => {
         outputs: {
           "dist/styles.css": {
             imports: [
-              { path: "https://example.invalid/styles.css", external: true }
-            ]
-          }
-        }
-      })
+              { path: "https://example.invalid/styles.css", external: true },
+            ],
+          },
+        },
+      }),
     ).toThrow("must not fetch an external asset");
   });
 
@@ -192,19 +233,19 @@ describe("packed library contracts", () => {
             inputs: { [`src/${entry}`]: {} },
             outputs: {
               [`dist/${entry}`]: {
-                imports: [{ path: "./theme.css", external: true }]
-              }
-            }
+                imports: [{ path: "./theme.css", external: true }],
+              },
+            },
           },
-          entry
-        )
+          entry,
+        ),
       ).toThrow("must not fetch an external asset");
-    }
+    },
   );
 
   it("accepts compiled, licensed graph exports and exact candidate core dependencies", () => {
     expect(() =>
-      validateLibraryManifest(manifest(), manifest().name, "0.1.0")
+      validateLibraryManifest(manifest(), manifest().name, "0.1.0"),
     ).not.toThrow();
   });
 
@@ -216,8 +257,8 @@ describe("packed library contracts", () => {
       typesVersions: {
         "*": {
           graph: ["dist/graph/index.d.ts"],
-          domain: ["dist/domain/index.d.ts"]
-        }
+          domain: ["dist/domain/index.d.ts"],
+        },
       },
       exports: {
         ...Object.fromEntries(
@@ -226,15 +267,15 @@ describe("packed library contracts", () => {
             {
               types: `./dist/${subpath}/index.d.ts`,
               import: `./dist/${subpath}/index.js`,
-              default: `./dist/${subpath}/index.js`
-            }
-          ])
+              default: `./dist/${subpath}/index.js`,
+            },
+          ]),
         ),
-        "./package.json": "./package.json"
-      }
+        "./package.json": "./package.json",
+      },
     };
     expect(() =>
-      validateLibraryManifest(core, core.name, "0.1.0")
+      validateLibraryManifest(core, core.name, "0.1.0"),
     ).not.toThrow();
     core.exports["."] = "./src/index.ts";
     expect(() => validateLibraryManifest(core, core.name, "0.1.0")).toThrow();
@@ -249,7 +290,7 @@ describe("packed library contracts", () => {
   it("rejects unrecognized library manifests", () => {
     const value = { ...manifest(), name: "unrecognized" };
     expect(() => validateLibraryManifest(value, value.name, "0.1.0")).toThrow(
-      "Unknown library"
+      "Unknown library",
     );
   });
 
@@ -258,104 +299,104 @@ describe("packed library contracts", () => {
       "missing classic TypeScript subpath declarations",
       (value) => {
         delete value.typesVersions;
-      }
+      },
     ],
     [
       "source-only classic TypeScript declarations",
       (value) => {
         value.typesVersions["*"].presentation = ["src/presentation.ts"];
-      }
+      },
     ],
     [
       "workspace dependency",
       (value) => {
         value.dependencies["@radius-project/core"] = "workspace:*";
-      }
+      },
     ],
     [
       "catalog dependency",
       (value) => {
         value.devDependencies = { vitest: "catalog:" };
-      }
+      },
     ],
     [
       "wrong core candidate",
       (value) => {
         value.dependencies["@radius-project/core"] = "0.2.0";
-      }
+      },
     ],
     [
       "source export",
       (value) => {
         value.exports["."].import = "./src/index.ts";
-      }
+      },
     ],
     [
       "missing declarations",
       (value) => {
         delete value.exports["."].types;
-      }
+      },
     ],
     [
       "missing stylesheet",
       (value) => {
         delete value.exports["./styles.css"];
-      }
+      },
     ],
     [
       "missing base stylesheet",
       (value) => {
         delete value.exports["./base.css"];
-      }
+      },
     ],
     [
       "source base stylesheet",
       (value) => {
         value.exports["./base.css"] = "./src/base.css";
-      }
+      },
     ],
     [
       "separate theme export",
       (value) => {
         value.exports["./theme.css"] = "./dist/theme.css";
-      }
+      },
     ],
     [
       "unretained stylesheet",
       (value) => {
         value.sideEffects = false;
-      }
+      },
     ],
     [
       "private package",
       (value) => {
         value.private = true;
-      }
+      },
     ],
     [
       "consumer-bundled Dagre dependency",
       (value) => {
         value.dependencies.dagre = "0.8.5";
-      }
+      },
     ],
     [
       "bundled React dependency",
       (value) => {
         value.dependencies.react = "19.2.8";
-      }
+      },
     ],
     [
       "unsupported peer range",
       (value) => {
         value.peerDependencies.react = "^19.2.8";
-      }
+      },
     ],
     [
       "unlicensed package",
       (value) => {
         delete value.license;
-      }
-    ]
+      },
+    ],
   ])("rejects %s", (_label, mutate) => {
     const value = manifest();
     mutate(value);
@@ -366,8 +407,8 @@ describe("packed library contracts", () => {
     const build = {
       inputs: { "src/index.ts": {} },
       outputs: {
-        "dist/index.js": { imports: [{ path: "react", external: true }] }
-      }
+        "dist/index.js": { imports: [{ path: "react", external: true }] },
+      },
     };
     expect(() => validateBuildBoundary(build, "graph-react")).not.toThrow();
     expect(() => validateBuildBoundary(build, "core")).toThrow("react");
@@ -384,16 +425,16 @@ describe("packed library contracts", () => {
   it.each([
     "node_modules/dagre",
     "../../node_modules/.pnpm/graphlib@2.1.8/node_modules/graphlib",
-    "..\\..\\node_modules\\lodash"
+    "..\\..\\node_modules\\lodash",
   ])(
     "tracks bundled layout licenses without admitting them to core: %s",
     (root) => {
       const metafile = { inputs: { [`${root}/index.js`]: {} }, outputs: {} };
       expect([...validateBuildBoundary(metafile, "graph-react")]).toEqual([
-        root.replaceAll("\\", "/")
+        root.replaceAll("\\", "/"),
       ]);
       expect(() => validateBuildBoundary(metafile, "core")).toThrow();
-    }
+    },
   );
 
   it("accepts internal chunks in the dependency-free core bundle", () => {
@@ -403,12 +444,12 @@ describe("packed library contracts", () => {
           inputs: { "src/graph/index.ts": {}, "src\\domain\\index.ts": {} },
           outputs: {
             "dist/graph/index.js": {
-              imports: [{ path: "dist/chunk.js", external: false }]
-            }
-          }
+              imports: [{ path: "dist/chunk.js", external: false }],
+            },
+          },
         },
-        "core"
-      )
+        "core",
+      ),
     ).not.toThrow();
   });
 
@@ -419,7 +460,7 @@ describe("packed library contracts", () => {
     "dagre",
     "graphlib",
     "lodash",
-    "lodash/cloneDeep"
+    "lodash/cloneDeep",
   ])("rejects a browser bundle importing %s", (path) => {
     expect(() =>
       validateBuildBoundary(
@@ -427,18 +468,18 @@ describe("packed library contracts", () => {
           inputs: { "src/index.ts": {} },
           outputs: {
             "dist/presentation.js": { imports: [] },
-            "dist/index.js": { imports: [{ path, external: true }] }
-          }
+            "dist/index.js": { imports: [{ path, external: true }] },
+          },
         },
-        "graph-react"
-      )
+        "graph-react",
+      ),
     ).toThrow(path);
   });
 
   it.each([
     "node_modules/react/index.js",
     "../adapter-canvas/src/index.ts",
-    "src/index.test.ts"
+    "src/index.test.ts",
   ])(
     "rejects bundled implementation outside the public library: %s",
     (input) => {
@@ -446,11 +487,11 @@ describe("packed library contracts", () => {
         validateBuildBoundary(
           {
             inputs: { [input]: {} },
-            outputs: {}
+            outputs: {},
           },
-          "graph-react"
-        )
+          "graph-react",
+        ),
       ).toThrow();
-    }
+    },
   );
 });

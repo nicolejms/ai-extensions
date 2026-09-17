@@ -10,8 +10,30 @@ export const scopedFlowStylesPath = join(
   "packages",
   "graph-react",
   "src",
-  "flow.css"
+  "flow.css",
 );
+
+// Renames a vendor keyframe so a scoped copy of the stylesheet cannot capture
+// the identically named animation a host defines for its own graph. A plain
+// string replacement would silently rewrite comments, URLs, and unrelated
+// identifiers, so every occurrence must first be a declaration or an animation
+// reference. A vendor update that introduces any other use fails review here
+// instead of producing a plausible but wrong generated asset.
+export function renameKeyframes(css, from, to) {
+  const count = (pattern) => (css.match(pattern) ?? []).length;
+  const declarations = count(
+    new RegExp(`@(?:-webkit-)?keyframes\\s+${from}\\b`, "g"),
+  );
+  const references = count(new RegExp(`animation:[^;{}]*\\b${from}\\b`, "g"));
+  assert.ok(declarations > 0, `Expected a ${from} keyframes declaration`);
+  assert.ok(references > 0, `Expected a ${from} animation reference`);
+  assert.equal(
+    count(new RegExp(`\\b${from}\\b`, "g")),
+    declarations + references,
+    `Unreviewed ${from} occurrence outside a keyframes declaration or animation`,
+  );
+  return css.replaceAll(from, to);
+}
 
 export function scopeFlowStyles(css, license) {
   assert.doesNotMatch(css, /@(?:import|font-face)\b/);
@@ -22,14 +44,14 @@ Do not edit: regenerate after reviewing a vendor update.
 ${license.trim()}
 */
 @scope (.radius-graph) {
-${css.trim().replaceAll("dashdraw", "radius-graph-dashdraw")}
+${renameKeyframes(css.trim(), "dashdraw", "radius-graph-dashdraw")}
 }
 `;
 }
 
 export function expectedScopedFlowStyles() {
   const fromGraph = createRequire(
-    join(repoRoot, "packages", "graph-react", "package.json")
+    join(repoRoot, "packages", "graph-react", "package.json"),
   );
   const cssPath = fromGraph.resolve("reactflow/dist/style.css");
   const root = resolve(dirname(cssPath), "..");
@@ -37,7 +59,7 @@ export function expectedScopedFlowStyles() {
   assert.equal(manifest.version, "11.11.4");
   return scopeFlowStyles(
     readFileSync(cssPath, "utf8"),
-    readFileSync(join(root, "LICENSE"), "utf8")
+    readFileSync(join(root, "LICENSE"), "utf8"),
   );
 }
 
