@@ -191,9 +191,6 @@ importers:
       '@radius-project/core':
         specifier: workspace:*
         version: link:../core
-      dagre:
-        specifier: 0.8.5
-        version: 0.8.5
       reactflow:
         specifier: 11.11.4
         version: 11.11.4(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -219,6 +216,9 @@ importers:
       '@vitest/browser-playwright':
         specifier: ^4.1.11
         version: 4.1.11(playwright@1.62.1)(vite@8.2.0(@types/node@24.13.3)(esbuild@0.28.2)(yaml@2.9.0))(vitest@4.1.11)
+      dagre:
+        specifier: 0.8.5
+        version: 0.8.5
       playwright:
         specifier: ^1.62.1
         version: 1.62.1

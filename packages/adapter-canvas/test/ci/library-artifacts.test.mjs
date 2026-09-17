@@ -1,11 +1,18 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { describe, expect, it } from "vitest";
 import {
+  libraryExternalImports,
   validateBuildBoundary,
   validateLibraryManifest,
   validateStylesheetBoundary
 } from "../../../../scripts/library-artifacts.mjs";
+import {
+  expectedScopedFlowStyles,
+  scopeFlowStyles,
+  scopedFlowStylesPath
+} from "../../../../scripts/graph-vendor-styles.mjs";
 
 function manifest() {
   return {
@@ -13,6 +20,9 @@ function manifest() {
     version: "0.1.0",
     license: "Apache-2.0",
     type: "module",
+    typesVersions: {
+      "*": { presentation: ["dist/presentation.d.ts"] }
+    },
     exports: {
       ".": {
         types: "./dist/index.d.ts",
@@ -30,7 +40,6 @@ function manifest() {
     },
     dependencies: {
       "@radius-project/core": "0.1.0",
-      dagre: "0.8.5",
       reactflow: "11.11.4"
     },
     peerDependencies: {
@@ -42,6 +51,32 @@ function manifest() {
 }
 
 describe("packed library contracts", () => {
+  it("retains the exact pinned vendor rules and license inside the graph scope", () => {
+    const css = readFileSync(scopedFlowStylesPath, "utf8");
+    expect(css).toBe(expectedScopedFlowStyles());
+    expect(css).toContain("MIT License");
+    expect(css).toContain("Copyright (c) 2019-2023 webkid GmbH");
+    expect(css).toContain("@scope (.radius-graph)");
+    expect(css).toContain("@keyframes radius-graph-dashdraw");
+    expect(css).not.toMatch(/@(?:-webkit-)?keyframes dashdraw/);
+  });
+
+  it.each(['@import "external.css";', "@font-face { font-family: other; }"])(
+    "rejects unreviewed global vendor inputs: %s",
+    (css) => {
+      expect(() => scopeFlowStyles(css, "MIT")).toThrow();
+    }
+  );
+
+  it("rejects accidentally bundling the unscoped vendor stylesheet", () => {
+    expect(() =>
+      validateStylesheetBoundary({
+        inputs: { "../../node_modules/reactflow/dist/style.css": {} },
+        outputs: {}
+      })
+    ).toThrow("Unexpected stylesheet input");
+  });
+
   it.each(["styles.css", "base.css"])(
     "bundles %s and React Flow styles without remote assets",
     (entry) => {
@@ -51,7 +86,7 @@ describe("packed library contracts", () => {
             inputs: {
               [`src\\${entry}`]: {},
               "src/base.css": {},
-              "../../node_modules/reactflow/dist/style.css": {}
+              "src/flow.css": {}
             },
             outputs: {
               [`dist/${entry}`]: {
@@ -87,11 +122,12 @@ describe("packed library contracts", () => {
       expect(css).toContain(".react-flow__handle");
       expect(css).toContain(".radius-graph");
       expect(css).not.toMatch(/@import\b/);
+      expect(css).toMatch(/@scope\s*\(\.radius-graph\)/);
       if (entry === "base.css") {
         expect(Object.keys(result.metafile.inputs)).not.toContain(
           "src/theme.css"
         );
-        expect(css).not.toMatch(/@scope\b/);
+        expect(css).not.toContain('data-radius-appearance="default"');
       } else {
         expect(Object.keys(result.metafile.inputs)).toEqual(
           expect.arrayContaining([
@@ -177,6 +213,12 @@ describe("packed library contracts", () => {
       name: "@radius-project/core",
       type: "module",
       license: "Apache-2.0",
+      typesVersions: {
+        "*": {
+          graph: ["dist/graph/index.d.ts"],
+          domain: ["dist/domain/index.d.ts"]
+        }
+      },
       exports: {
         ...Object.fromEntries(
           ["graph", "domain"].map((subpath) => [
@@ -212,6 +254,18 @@ describe("packed library contracts", () => {
   });
 
   it.each([
+    [
+      "missing classic TypeScript subpath declarations",
+      (value) => {
+        delete value.typesVersions;
+      }
+    ],
+    [
+      "source-only classic TypeScript declarations",
+      (value) => {
+        value.typesVersions["*"].presentation = ["src/presentation.ts"];
+      }
+    ],
     [
       "workspace dependency",
       (value) => {
@@ -279,6 +333,12 @@ describe("packed library contracts", () => {
       }
     ],
     [
+      "consumer-bundled Dagre dependency",
+      (value) => {
+        value.dependencies.dagre = "0.8.5";
+      }
+    ],
+    [
       "bundled React dependency",
       (value) => {
         value.dependencies.react = "19.2.8";
@@ -302,7 +362,7 @@ describe("packed library contracts", () => {
     expect(() => validateLibraryManifest(value, value.name, "0.1.0")).toThrow();
   });
 
-  it("accepts only source-owned build inputs with external peer and runtime dependencies", () => {
+  it("accepts source-owned inputs with external peer and renderer dependencies", () => {
     const build = {
       inputs: { "src/index.ts": {} },
       outputs: {
@@ -312,6 +372,29 @@ describe("packed library contracts", () => {
     expect(() => validateBuildBoundary(build, "graph-react")).not.toThrow();
     expect(() => validateBuildBoundary(build, "core")).toThrow("react");
   });
+
+  it("bundles the layout engine instead of deferring conditional requires to consumers", () => {
+    for (const dependency of ["dagre", "graphlib", "lodash"]) {
+      expect(libraryExternalImports("graph-react")).not.toContain(dependency);
+    }
+    expect(libraryExternalImports("core")).toEqual([]);
+    expect(() => libraryExternalImports("other")).toThrow();
+  });
+
+  it.each([
+    "node_modules/dagre",
+    "../../node_modules/.pnpm/graphlib@2.1.8/node_modules/graphlib",
+    "..\\..\\node_modules\\lodash"
+  ])(
+    "tracks bundled layout licenses without admitting them to core: %s",
+    (root) => {
+      const metafile = { inputs: { [`${root}/index.js`]: {} }, outputs: {} };
+      expect([...validateBuildBoundary(metafile, "graph-react")]).toEqual([
+        root.replaceAll("\\", "/")
+      ]);
+      expect(() => validateBuildBoundary(metafile, "core")).toThrow();
+    }
+  );
 
   it("accepts internal chunks in the dependency-free core bundle", () => {
     expect(() =>
@@ -329,22 +412,28 @@ describe("packed library contracts", () => {
     ).not.toThrow();
   });
 
-  it.each(["node:fs", "@radius-project/adapter-canvas", "@github/copilot-sdk"])(
-    "rejects a browser bundle importing %s",
-    (path) => {
-      expect(() =>
-        validateBuildBoundary(
-          {
-            inputs: { "src/index.ts": {} },
-            outputs: {
-              "dist/index.js": { imports: [{ path, external: true }] }
-            }
-          },
-          "graph-react"
-        )
-      ).toThrow(path);
-    }
-  );
+  it.each([
+    "node:fs",
+    "@radius-project/adapter-canvas",
+    "@github/copilot-sdk",
+    "dagre",
+    "graphlib",
+    "lodash",
+    "lodash/cloneDeep"
+  ])("rejects a browser bundle importing %s", (path) => {
+    expect(() =>
+      validateBuildBoundary(
+        {
+          inputs: { "src/index.ts": {} },
+          outputs: {
+            "dist/presentation.js": { imports: [] },
+            "dist/index.js": { imports: [{ path, external: true }] }
+          }
+        },
+        "graph-react"
+      )
+    ).toThrow(path);
+  });
 
   it.each([
     "node_modules/react/index.js",

@@ -448,6 +448,19 @@ try {
       graphTarball,
       coreManifest.version
     );
+    const notices = readFileSync(
+      join(installedGraph, "dist", "THIRD_PARTY_NOTICES.txt"),
+      "utf8"
+    );
+    assert.equal(
+      notices,
+      readFileSync(join(graphRoot, "dist", "THIRD_PARTY_NOTICES.txt"), "utf8")
+    );
+    for (const dependency of ["dagre", "graphlib", "lodash"]) {
+      assert.match(notices, new RegExp(`^${dependency}@[\\d.]+$`, "m"));
+      assert.equal(consumerDependencies[dependency], undefined);
+    }
+    assert.match(notices, /Permission is hereby granted, free of charge/);
     const consumerRequire = createRequire(join(consumer, "package.json"));
     const graphRequire = createRequire(join(installedGraph, "package.json"));
     assert.equal(
@@ -589,7 +602,7 @@ try {
           false,
           "The base-only consumer must not bundle the default skin"
         );
-        assert.doesNotMatch(css, /@scope\b/);
+        assert.doesNotMatch(css, /data-radius-appearance/);
       }
     }
     await exerciseBrowser(consumer);

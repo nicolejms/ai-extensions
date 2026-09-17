@@ -15,6 +15,16 @@ const publicExports = {
   }
 };
 
+const legacyTypeExports = {
+  "@radius-project/core": {
+    graph: ["dist/graph/index.d.ts"],
+    domain: ["dist/domain/index.d.ts"]
+  },
+  "@radius-project/graph-react": {
+    presentation: ["dist/presentation.d.ts"]
+  }
+};
+
 export function validateLibraryManifest(manifest, name, coreVersion) {
   assert.equal(manifest.name, name);
   assert.notEqual(manifest.private, true, `${name} must be publishable`);
@@ -23,6 +33,7 @@ export function validateLibraryManifest(manifest, name, coreVersion) {
   assert.doesNotMatch(JSON.stringify(manifest), /(?:workspace|catalog):/);
   const expected = publicExports[name];
   assert.ok(expected, `Unknown library: ${name}`);
+  assert.deepEqual(manifest.typesVersions, { "*": legacyTypeExports[name] });
   assert.deepEqual(
     Object.keys(manifest.exports).sort(),
     Object.keys(expected).sort()
@@ -40,7 +51,7 @@ export function validateLibraryManifest(manifest, name, coreVersion) {
   }
   if (name === "@radius-project/graph-react") {
     assert.equal(manifest.dependencies["@radius-project/core"], coreVersion);
-    assert.equal(manifest.dependencies.dagre, "0.8.5");
+    assert.equal(manifest.dependencies.dagre, undefined);
     assert.equal(manifest.dependencies.reactflow, "11.11.4");
     assert.equal(manifest.dependencies.react, undefined);
     assert.equal(manifest.dependencies["react-dom"], undefined);
@@ -52,24 +63,35 @@ export function validateLibraryManifest(manifest, name, coreVersion) {
   }
 }
 
-export function validateBuildBoundary(metafile, directory) {
-  for (const input of Object.keys(metafile.inputs)) {
-    assert.match(input.replaceAll("\\", "/"), /^src\//);
-    assert.doesNotMatch(input, /node_modules|adapter-|\.test\.|\.browser\./);
-  }
-
-  const allowed = new Set(
-    directory === "core" ?
+export function libraryExternalImports(directory) {
+  assert.ok(directory === "core" || directory === "graph-react");
+  return directory === "core" ?
       []
     : [
         "react",
         "react-dom/client",
         "reactflow",
-        "dagre",
         "@radius-project/core/graph",
         "@radius-project/core/domain"
-      ]
-  );
+      ];
+}
+
+export function validateBuildBoundary(metafile, directory) {
+  const allowed = new Set(libraryExternalImports(directory));
+  const bundledRoots = new Set();
+  for (const input of Object.keys(metafile.inputs)) {
+    const path = input.replaceAll("\\", "/");
+    assert.doesNotMatch(path, /adapter-|\.test\.|\.browser\./);
+    const vendor = path.match(
+      /(?:^|\/)node_modules\/(?:dagre|graphlib|lodash)\//
+    );
+    if (directory === "graph-react" && vendor) {
+      bundledRoots.add(path.slice(0, vendor.index + vendor[0].length - 1));
+    } else {
+      assert.match(path, /^src\//);
+      assert.doesNotMatch(path, /node_modules/);
+    }
+  }
   for (const output of Object.values(metafile.outputs)) {
     for (const imported of output.imports) {
       if (imported.external) {
@@ -80,6 +102,7 @@ export function validateBuildBoundary(metafile, directory) {
       }
     }
   }
+  return bundledRoots;
 }
 
 export function validateStylesheetBoundary(metafile, entry = "styles.css") {
@@ -89,15 +112,12 @@ export function validateStylesheetBoundary(metafile, entry = "styles.css") {
   );
   const allowed = new Set(
     entry === "base.css" ?
-      ["src/base.css"]
-    : ["src/styles.css", "src/base.css", "src/theme.css"]
+      ["src/base.css", "src/flow.css"]
+    : ["src/styles.css", "src/base.css", "src/theme.css", "src/flow.css"]
   );
   for (const input of Object.keys(metafile.inputs)) {
     const path = input.replaceAll("\\", "/");
-    assert.ok(
-      allowed.has(path) || path.endsWith("/reactflow/dist/style.css"),
-      `Unexpected stylesheet input: ${input}`
-    );
+    assert.ok(allowed.has(path), `Unexpected stylesheet input: ${input}`);
   }
   for (const output of Object.values(metafile.outputs)) {
     for (const imported of output.imports) {

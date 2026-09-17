@@ -71,6 +71,24 @@ Inline `options` and `callbacks` objects are safe. A host render that reallocate
 
 For a server-rendered shell, `mountRadiusGraph(element, props)` mounts this same component and returns `update(props): boolean` and idempotent `unmount()`. It is a compatibility boundary, not a separate renderer. Canvas keeps SDK interaction, local HTTP, source-opening fallback, worktree context, and workflow orchestration in `packages/adapter-canvas`.
 
+## Headlamp integration
+
+Headlamp plugins render `RadiusGraph` inside their existing React tree, not through the standalone mount helper. Match the host's React and ReactDOM peers rather than installing Canvas's React version. The qualification target is [Headlamp v0.45.0](https://github.com/kubernetes-sigs/headlamp/tree/0e9fe810cb618964172f420666727c9a67fd6ebf), which uses React/ReactDOM 18.3.1 and React Flow 12.10.2 for its own graphs. The published plugin SDK is `@kinvolk/headlamp-plugin@0.14.0`; its TypeScript 5.6.2 configuration uses classic `node` module resolution. The library's declaration mappings support that configuration without aliases, casts, or a host compiler upgrade.
+
+Import one of the public CSS entry points in the plugin entry. The SDK builds the plugin and injects its imported CSS. `theme` can derive palette values from Headlamp's MUI `useTheme()` hook; use custom appearance and stable styling hooks for more extensive host styling. Headlamp's cluster-free plugin routes use `useClusterURL: false` and `noAuthRequired: true`, but a production Radius route must retain whatever cluster and authorization requirements its data retrieval needs.
+
+The package compiles its existing Dagre engine and locked graphlib/lodash dependencies into browser-safe ESM. Headlamp's published builder leaves some CommonJS conditional `require()` calls unresolved, so shipping the raw Dagre entry would fail during plugin initialization even after a successful TypeScript check and plugin build. Consumers do not need global `graphlib` or lodash objects, custom CommonJS settings, or another layout engine. React, ReactDOM, React Flow, and browser-safe core imports retain their explicit package boundaries; bundled dependency licenses ship in `dist/THIRD_PARTY_NOTICES.txt`.
+
+The host adapter still owns cluster selection, retrieving or mapping Radius resources, navigation, and authorization. This library is not a generic Kubernetes graph normalizer and does not add a Radius plugin or Kubernetes API client to Headlamp. Core input semantics remain the same across hosts. Headlamp's lazy-loaded graph styles and the Radius stylesheet must coexist in either load order; importing Radius must not change Headlamp's own graph controls.
+
+### Reproduce Headlamp qualification
+
+With Docker available, run `pnpm run test:integration:headlamp`. The dedicated CI gate prepares pinned tooling and the official Headlamp image, then runs the qualification without external network access. It installs the exact packed core and graph candidates, checks declarations with the published SDK's unmodified classic-resolution configuration, builds a plugin through that SDK, and lets the real Headlamp server discover and load it. It does not mock `pluginLib` or install into a user's Headlamp instance.
+
+The checked-in fixture verifies rendering and finite geometry, MUI theme context, keyboard details/focus restoration, icon sizing, navigation callbacks, zoom, unmount/reopen, and dark theme. A host-only Flow 12 baseline protects computed styles and rendered dimensions when Headlamp's actual lazy GraphView CSS loads before or after Radius CSS. A missing-stylesheet negative control must fail geometry checks. Receipts preserve candidate hashes, tooling/configuration hashes, host provenance, and browser version; the fixture's npm lock is separate from workspace release discovery.
+
+The qualified target is the official Headlamp v0.45.0 web host, React 18.3.1, SDK 0.14.0, TypeScript 5.6.2, and Chromium 151.0.7922.34 on Linux ARM64. Both stylesheet orders and the interaction/negative-control checks pass without candidate initialization or page errors. Expected host-only empty-cluster CRD diagnostics remain recorded. This does not qualify Electron, other browsers, live Kubernetes authorization/data retrieval, ingress CSP restrictions, or the separate dashboard-host gates below.
+
 ## Styling contract
 
 Choose one CSS entry point. Neither is imported automatically by JavaScript or downloaded at runtime:
@@ -80,7 +98,7 @@ Choose one CSS entry point. Neither is imported automatically by JavaScript or d
 | `@radius-project/graph-react/styles.css` | Required base styles plus the existing default skin. Existing consumers and Canvas need no change.                                                         |
 | `@radius-project/graph-react/base.css`   | Required graph geometry, hit testing, and the pinned React Flow vendor CSS, without the Radius skin. Use with `appearance="custom"` and a host stylesheet. |
 
-The same React tree implements both appearances. `appearance="custom"` disables the default skin for that instance even if another graph imports `styles.css` in the same document. `appearance` defaults to `"default"`. The default skin uses CSS `@scope` (a browser supporting `@scope` is required); host styles for custom instances do not need it. Radius-authored CSS is confined to graph elements. The bundled React Flow stylesheet retains its upstream `.react-flow` namespace: this is not Shadow DOM isolation, and hosts with other React Flow instances should coordinate that vendor version and stylesheet. Broad host resets can still affect the graph.
+The same React tree implements both appearances. `appearance="custom"` disables the default skin for that instance even if another graph imports `styles.css` in the same document. `appearance` defaults to `"default"`. Both CSS entry points use `@scope` and require a browser supporting it. Radius and vendor rules are confined to graph elements; vendor keyframe names are also prefixed. This prevents the library from restyling another host renderer, including Headlamp's React Flow 12 graph. It is not Shadow DOM isolation: incoming host resets can still affect the graph.
 
 ### Keep the default appearance, change tokens
 
@@ -164,6 +182,10 @@ Changing `appearance`, `theme`, `className`, or a stylesheet does not rebuild gr
 ## Packaging and provenance
 
 The package exports JavaScript and declarations, bundled `styles.css` and `base.css`, and a `presentation` subpath for typed graph presentation helpers. React and ReactDOM remain peers. Canvas bundles shared source into its existing self-contained browser artifact, ultimately `.artifacts/radius/com.github.copilot/extensions/radius/extension.mjs`; no package source is downloaded at runtime. Library release/version handling is separate from Copilot plugin discovery and release selection. No public registry publication is part of this implementation.
+
+`core/graph`, `core/domain`, and `graph-react/presentation` also provide `typesVersions` mappings for classic TypeScript Node resolution. Modern NodeNext/Bundler consumers continue using the existing `exports` map. Consumers do not need path aliases to the source tree or a compiler upgrade to resolve these declarations.
+
+`src/flow.css` is generated from the pinned React Flow 11 stylesheet, with its MIT license retained, a graph scope, and namespaced keyframes. It is not independently maintained vendor behavior. After reviewing a vendor update, regenerate it with `node scripts/graph-vendor-styles.mjs`; `--check` and the artifact tests detect drift. Keeping this asset in source ensures Vite consumers, the synchronous Canvas browser build, and packed libraries all use exactly the same rules.
 
 The renderer and its existing pure/browser scenarios were extracted from `ai-extensions` at `172782e`. The old Canvas renderer, layout, details, legend, model, and graph-specific stylesheet ownership were removed rather than copied into a second implementation. Canvas callers import the shared public API directly; no legacy graph forwarding modules remain.
 

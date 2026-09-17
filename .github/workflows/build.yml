@@ -233,9 +233,53 @@ jobs:
       - name: Verify offline npm library candidates with React 18 and 19
         run: pnpm run test:integration:libraries
 
+  headlamp-compatibility:
+    name: Real Headlamp web compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Provision pinned repository and Chromium dependencies
+        run: |
+          docker build \
+            --tag radius-canvas-visual:playwright-1.62.1-node-24.19.0 \
+            --file packages/adapter-canvas/test/visual/Dockerfile .
+
+      - name: Provision official Headlamp and locked published plugin tooling
+        run: |
+          docker build \
+            --tag radius-headlamp-qualification:0.45.0 \
+            --file scripts/fixtures/headlamp/Dockerfile scripts/fixtures/headlamp
+
+      - name: Qualify candidate packages in the actual offline Headlamp host
+        run: node scripts/test-headlamp.mjs --output .artifacts/headlamp-ci
+
+      - name: Upload Headlamp version receipts, negative controls and browser traces
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: headlamp-compatibility
+          path: .artifacts/headlamp-ci
+          if-no-files-found: error
+          retention-days: 14
+
   build-gate:
     name: Shared release gate
-    needs: [static-checks, windows-process-integration, canvas-chromium, node-tests]
+    needs:
+      [
+        static-checks,
+        windows-process-integration,
+        canvas-chromium,
+        node-tests,
+        headlamp-compatibility
+      ]
     runs-on: ubuntu-latest
     permissions:
       contents: read

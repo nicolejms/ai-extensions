@@ -14,6 +14,13 @@
   "files": [
     "dist"
   ],
+  "typesVersions": {
+    "*": {
+      "presentation": [
+        "dist/presentation.d.ts"
+      ]
+    }
+  },
   "sideEffects": [
     "**/*.css"
   ],
@@ -44,7 +51,6 @@
   },
   "dependencies": {
     "@radius-project/core": "workspace:*",
-    "dagre": "0.8.5",
     "reactflow": "11.11.4"
   },
   "peerDependencies": {
@@ -59,6 +65,7 @@
     "@types/react-dom": "^19.2.5",
     "@vitest/browser": "catalog:",
     "@vitest/browser-playwright": "^4.1.11",
+    "dagre": "0.8.5",
     "playwright": "^1.62.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",

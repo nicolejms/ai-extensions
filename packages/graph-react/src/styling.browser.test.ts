@@ -73,6 +73,31 @@ const hostCss = `
 `;
 
 describe("host stylesheet ownership", () => {
+  it.each(["before", "after"])(
+    "does not restyle another Flow renderer when host CSS loads %s",
+    async (order) => {
+      const css = stylesheet(
+        ".react-flow__controls-button { width: 36px; height: 36px; padding: 2px; }"
+      );
+      if (order === "after") document.head.append(css);
+      const peer = document.createElement("button");
+      peer.className = "react-flow__controls-button";
+      peer.textContent = "Host graph control";
+      document.body.append(peer);
+      cleanups.push(() => peer.remove());
+      const mounted = mount();
+      await within(mounted.host).findByRole("group", { name: "web" });
+      expect(getComputedStyle(peer).width).toBe("36px");
+      expect(getComputedStyle(peer).height).toBe("36px");
+      expect(getComputedStyle(peer).boxSizing).toBe("border-box");
+      expect(peer.getBoundingClientRect().width).toBe(36);
+      expect(peer.getBoundingClientRect().height).toBe(36);
+      const control = element(mounted.host, ".react-flow__controls-button");
+      expect(getComputedStyle(control).width).toBe("26px");
+      expect(getComputedStyle(control).height).toBe("26px");
+    }
+  );
+
   it("uses one renderer with independent host and default skins and no inline paint", async () => {
     stylesheet(hostCss);
     const onOpenSource = vi.fn();

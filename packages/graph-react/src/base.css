@@ -1,4 +1,4 @@
-@import "reactflow/dist/style.css";
+@import "./flow.css";
 
 /* Keep geometry and hit testing common; the skin is optional. */
 .radius-graph {
