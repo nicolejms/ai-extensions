@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -14,6 +15,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { versionPlan } from "../../../../scripts/release-version.mjs";
 import { libraryNames } from "../../../../scripts/libraries.mjs";
+import { listPlugins } from "../../../../scripts/plugins.mjs";
 
 const plugins = [{ name: "radius" }, { name: "radius-aws" }];
 const repoRoot = fileURLToPath(new URL("../../../..", import.meta.url));
@@ -322,5 +324,36 @@ describe("scripts/release-version.mjs", () => {
     expect(result.status).not.toBe(0);
     expect(readFileSync(config, "utf8")).toBe(before);
     expect(existsSync(join(root, ".changeset", "mixed.md"))).toBe(true);
+  });
+
+  // The rejection above is what a release job would hit, long after review. A
+  // note that names both scopes is a repository mistake, so fail here instead.
+  it("keeps every pending changeset within one release scope", () => {
+    const libraries = new Set(libraryNames());
+    const pluginNames = new Set(listPlugins().map((plugin) => plugin.name));
+    const directory = join(repoRoot, ".changeset");
+    const notes = readdirSync(directory)
+      .filter((name) => name.endsWith(".md") && name !== "README.md")
+      .map((name) => {
+        const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(
+          readFileSync(join(directory, name), "utf8")
+        );
+        return {
+          name,
+          packages: [...(frontmatter?.[1] ?? "").matchAll(/^"([^"]+)":/gm)].map(
+            (match) => match[1]
+          )
+        };
+      });
+
+    expect(
+      notes.filter(
+        (note) =>
+          note.packages.some((name) => libraries.has(name)) &&
+          note.packages.some((name) => pluginNames.has(name))
+      )
+    ).toEqual([]);
+    // A note naming nothing recognizable would pass the check above vacuously.
+    expect(notes.filter((note) => note.packages.length === 0)).toEqual([]);
   });
 });
