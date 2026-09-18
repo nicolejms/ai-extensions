@@ -12,7 +12,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
-  writeFileSync,
+  writeFileSync
 } from "node:fs";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
@@ -30,7 +30,7 @@ import {
   validateHostSample,
   validatePeerStyles,
   validateTarEntries,
-  withoutCandidateStyles,
+  withoutCandidateStyles
 } from "./contracts.mjs";
 
 const json = (path) => JSON.parse(readFileSync(path, "utf8"));
@@ -44,14 +44,14 @@ function run(command, args, cwd, env, log) {
     env,
     encoding: "utf8",
     timeout: 120_000,
-    maxBuffer: 16 * 1024 * 1024,
+    maxBuffer: 16 * 1024 * 1024
   });
   writeFileSync(log, `${result.stdout ?? ""}\n${result.stderr ?? ""}`);
   if (result.error) throw result.error;
   assert.equal(
     result.status,
     0,
-    `${command} failed; ${log}:\n${`${result.stdout}\n${result.stderr}`.split("\n").slice(0, 25).join("\n")}`,
+    `${command} failed; ${log}:\n${`${result.stdout}\n${result.stderr}`.split("\n").slice(0, 25).join("\n")}`
   );
   return result.stdout;
 }
@@ -62,14 +62,14 @@ async function availablePort() {
   await once(server, "listening");
   const port = server.address().port;
   await new Promise((resolve, reject) =>
-    server.close((error) => (error ? reject(error) : resolve())),
+    server.close((error) => (error ? reject(error) : resolve()))
   );
   return port;
 }
 
 async function peerStyles(page) {
   const controls = page.locator(
-    ".headlamp-peer-flow .react-flow__controls-button",
+    ".headlamp-peer-flow .react-flow__controls-button"
   );
   await expect(controls).toHaveCount(4);
   return controls.evaluateAll((buttons) =>
@@ -85,10 +85,10 @@ async function peerStyles(page) {
           "backgroundColor",
           "color",
           "borderRadius",
-          "fontSize",
-        ].map((key) => [key, css[key]]),
+          "fontSize"
+        ].map((key) => [key, css[key]])
       );
-    }),
+    })
   );
 }
 
@@ -103,9 +103,9 @@ async function cards(graph) {
         top: box.top,
         bottom: box.bottom,
         width: box.width,
-        height: box.height,
+        height: box.height
       };
-    }),
+    })
   );
 }
 
@@ -118,7 +118,7 @@ async function samplePeer(page) {
       ".react-flow__edge-path",
       ".react-flow__controls",
       ".react-flow__controls-button",
-      ".react-flow__controls-button svg",
+      ".react-flow__controls-button svg"
     ];
     const properties = [
       "width",
@@ -144,7 +144,7 @@ async function samplePeer(page) {
       "stroke",
       "stroke-width",
       "max-width",
-      "max-height",
+      "max-height"
     ];
     return Object.fromEntries(
       selectors.map((selector) => [
@@ -154,11 +154,11 @@ async function samplePeer(page) {
           return Object.fromEntries(
             properties.map((property) => [
               property,
-              css.getPropertyValue(property),
-            ]),
+              css.getPropertyValue(property)
+            ])
           );
-        }),
-      ]),
+        })
+      ])
     );
   });
 }
@@ -168,25 +168,25 @@ async function auditCssOrder(page, output, order) {
   assert.equal(
     before[".react-flow__node"][0].position,
     "absolute",
-    "The Flow 12 baseline must load its own real vendor stylesheet",
+    "The Flow 12 baseline must load its own real vendor stylesheet"
   );
   assert.equal(before[".react-flow__node"][0].width, "150px");
   const results = { before, stages: [] };
   let previous = before;
   for (const stage of order) {
     const button =
-      stage === "headlamp"
-        ? "Load Headlamp GraphView stylesheet"
-        : "Load candidate stylesheet";
+      stage === "headlamp" ?
+        "Load Headlamp GraphView stylesheet"
+      : "Load candidate stylesheet";
     const suffix =
       stage === "headlamp" ? HEADLAMP_GRAPHVIEW_CSS : "candidate-styles.css";
     await page.getByRole("button", { name: button }).click();
     await page.waitForFunction(
       (name) =>
         Array.from(globalThis.document.styleSheets).some((sheet) =>
-          sheet.href?.endsWith(`/${name}`),
+          sheet.href?.endsWith(`/${name}`)
         ),
-      suffix,
+      suffix
     );
     const computed = await samplePeer(page);
     const changes = styleChanges(previous, computed);
@@ -203,21 +203,21 @@ async function auditCssOrder(page, output, order) {
   await page.screenshot({
     path: join(output, `css-${name}.png`),
     fullPage: true,
-    timeout: 30_000,
+    timeout: 30_000
   });
   return results;
 }
 
 async function exerciseCandidate(page) {
   await expect(
-    page.getByRole("status", { name: "Host React version" }),
+    page.getByRole("status", { name: "Host React version" })
   ).toHaveText("18.3.1");
   await expect(page.getByRole("status", { name: "Host MUI mode" })).toHaveText(
-    /light|dark/,
+    /light|dark/
   );
   const graph = page.getByRole("region", {
     name: "Application graph",
-    exact: true,
+    exact: true
   });
   await expect(graph.locator('[data-radius-part="node"]')).toHaveCount(2);
   validateCardGeometry(await cards(graph));
@@ -229,13 +229,13 @@ async function exerciseCandidate(page) {
   await expect(edge).toHaveCount(1);
   const geometry = await edge.evaluate((path) => ({
     d: path.getAttribute("d"),
-    length: path.getTotalLength(),
+    length: path.getTotalLength()
   }));
   assert.ok(
     geometry.d &&
       !/NaN|Infinity/.test(geometry.d) &&
       Number.isFinite(geometry.length) &&
-      geometry.length > 0,
+      geometry.length > 0
   );
   const details = web.getByRole("button", { name: "Show details" });
   await details.focus();
@@ -248,7 +248,7 @@ async function exerciseCandidate(page) {
   await expect(details).toBeFocused();
   await web.getByRole("button", { name: "Open web" }).click();
   await expect(
-    page.getByRole("status", { name: "Graph navigation" }),
+    page.getByRole("status", { name: "Graph navigation" })
   ).toHaveText(/containers\/web$/);
   const viewport = graph.locator(".react-flow__viewport");
   const previous = await viewport.getAttribute("style");
@@ -256,7 +256,7 @@ async function exerciseCandidate(page) {
   await expect(viewport).not.toHaveAttribute("style", previous);
 
   const sourceGraph = page.getByRole("region", {
-    name: "Modeled source graph",
+    name: "Modeled source graph"
   });
   const sourceNode = sourceGraph.getByRole("group", { name: "modeled-web" });
   await sourceNode.getByRole("button", { name: "Show details" }).focus();
@@ -266,7 +266,7 @@ async function exerciseCandidate(page) {
   const source = sourcePanel.getByRole("link", { name: "View source code" });
   await expect(source).toHaveAttribute(
     "href",
-    "https://github.com/radius-project/offline-fixture/blob/main/src/web.ts",
+    "https://github.com/radius-project/offline-fixture/blob/main/src/web.ts"
   );
   const icon = source.locator("svg");
   await expect(icon).toHaveCSS("width", "14px");
@@ -274,13 +274,13 @@ async function exerciseCandidate(page) {
   await source.focus();
   await page.keyboard.press("Enter");
   await expect(
-    page.getByRole("status", { name: "Graph navigation" }),
+    page.getByRole("status", { name: "Graph navigation" })
   ).toHaveText(
-    "https://github.com/radius-project/offline-fixture/blob/main/src/web.ts",
+    "https://github.com/radius-project/offline-fixture/blob/main/src/web.ts"
   );
   await page.keyboard.press("Escape");
   await expect(
-    sourceNode.getByRole("button", { name: "Show details" }),
+    sourceNode.getByRole("button", { name: "Show details" })
   ).toBeFocused();
   await page.getByRole("button", { name: "Toggle Radius graph" }).click();
   await expect(graph).toHaveCount(0);
@@ -302,7 +302,7 @@ async function hostScenario({
   env,
   browser,
   baseline,
-  auditCss = false,
+  auditCss = false
 }) {
   const plugins = join(work, `plugins-${variant}`);
   const plugin = join(plugins, "radius-headlamp-consumer");
@@ -317,9 +317,9 @@ async function hostScenario({
         "@radius-project",
         "graph-react",
         "dist",
-        "styles.css",
+        "styles.css"
       ),
-      join(plugin, "candidate-styles.css"),
+      join(plugin, "candidate-styles.css")
     );
   }
   const port = await availablePort();
@@ -342,15 +342,15 @@ async function hostScenario({
       join(work, "empty-kubeconfig"),
       "-kubeconfig-dir",
       join(work, "kubeconfigs"),
-      "-watch-plugins-changes=false",
+      "-watch-plugins-changes=false"
     ],
-    { env, stdio: ["ignore", "pipe", "pipe"] },
+    { env, stdio: ["ignore", "pipe", "pipe"] }
   );
   server.stdout.pipe(log);
   server.stderr.pipe(log);
   const context = await browser.newContext({
     viewport: { width: 1600, height: 1100 },
-    colorScheme: "light",
+    colorScheme: "light"
   });
   const requests = [];
   const errors = [];
@@ -358,7 +358,7 @@ async function hostScenario({
   await context.tracing.start({
     screenshots: true,
     snapshots: true,
-    sources: true,
+    sources: true
   });
   const page = await context.newPage();
   page.setDefaultTimeout(10_000);
@@ -369,9 +369,9 @@ async function hostScenario({
   });
   page.on("request", (request) => requests.push(request.url()));
   await context.route("**/*", (route) =>
-    new URL(route.request().url()).origin === origin
-      ? route.continue()
-      : route.abort(),
+    new URL(route.request().url()).origin === origin ?
+      route.continue()
+    : route.abort()
   );
   try {
     await expect
@@ -380,7 +380,7 @@ async function hostScenario({
           assert.equal(
             server.exitCode,
             null,
-            "Headlamp server exited before readiness",
+            "Headlamp server exited before readiness"
           );
           try {
             return (await fetch(origin)).status;
@@ -388,16 +388,16 @@ async function hostScenario({
             return 0;
           }
         },
-        { timeout: 30_000 },
+        { timeout: 30_000 }
       )
       .toBe(200);
     await page.goto(`${origin}/radius-graph-compatibility`);
     await expect(
-      page.getByRole("main", { name: "Radius Headlamp compatibility" }),
+      page.getByRole("main", { name: "Radius Headlamp compatibility" })
     ).toBeVisible({ timeout: 30_000 });
     if (!auditCss) {
       await page.addStyleTag({
-        url: `${origin}/assets/${HEADLAMP_GRAPHVIEW_CSS}`,
+        url: `${origin}/assets/${HEADLAMP_GRAPHVIEW_CSS}`
       });
     }
     const peer = await peerStyles(page);
@@ -406,37 +406,37 @@ async function hostScenario({
     if (sample) save(join(output, `peer-sample-${variant}.json`), sample);
     if (auditCss) {
       await expect(
-        page.locator(".headlamp-peer-flow .react-flow__node"),
+        page.locator(".headlamp-peer-flow .react-flow__node")
       ).toHaveCount(2);
       await expect(
-        page.locator(".headlamp-peer-flow .react-flow__edge-path"),
+        page.locator(".headlamp-peer-flow .react-flow__edge-path")
       ).toHaveCount(1);
       const hostFirst = await auditCssOrder(page, output, [
         "headlamp",
-        "radius",
+        "radius"
       ]);
       await page.reload();
       await expect(
-        page.getByRole("main", { name: "Radius Headlamp compatibility" }),
+        page.getByRole("main", { name: "Radius Headlamp compatibility" })
       ).toBeVisible({ timeout: 30_000 });
       const radiusFirst = await auditCssOrder(page, output, [
         "radius",
-        "headlamp",
+        "headlamp"
       ]);
       const residual = styleChanges(
         hostFirst.stages[0].computed,
-        radiusFirst.stages[1].computed,
+        radiusFirst.stages[1].computed
       );
       save(join(output, "css-radius-first-residual.json"), residual);
       console.log(
-        `Radius after actual GraphView CSS: ${hostFirst.stages[1].changes.length} changes; Radius before GraphView: ${residual.length} residual changes.`,
+        `Radius after actual GraphView CSS: ${hostFirst.stages[1].changes.length} changes; Radius before GraphView: ${residual.length} residual changes.`
       );
     } else if (variant === "candidate") {
       validatePeerStyles(baseline.peer, peer);
       validateHostSample(baseline.sample, sample, "loaded with");
       await exerciseCandidate(page);
       await page.addStyleTag({
-        url: `${origin}/plugins/radius-headlamp-consumer/candidate-styles.css`,
+        url: `${origin}/plugins/radius-headlamp-consumer/candidate-styles.css`
       });
       const radiusLast = await peerStyles(page);
       save(join(output, "peer-candidate-radius-last.json"), radiusLast);
@@ -444,61 +444,61 @@ async function hostScenario({
       const radiusLastSample = await samplePeer(page);
       save(
         join(output, "peer-sample-candidate-radius-last.json"),
-        radiusLastSample,
+        radiusLastSample
       );
       validateHostSample(baseline.sample, radiusLastSample, "loaded after");
       await exerciseCandidate(page);
       await page.emulateMedia({ colorScheme: "dark" });
       await page.reload();
       await expect(
-        page.getByRole("main", { name: "Radius Headlamp compatibility" }),
+        page.getByRole("main", { name: "Radius Headlamp compatibility" })
       ).toBeVisible({ timeout: 30_000 });
       await page.addStyleTag({
-        url: `${origin}/assets/${HEADLAMP_GRAPHVIEW_CSS}`,
+        url: `${origin}/assets/${HEADLAMP_GRAPHVIEW_CSS}`
       });
       await expect(
-        page.getByRole("status", { name: "Host MUI mode" }),
+        page.getByRole("status", { name: "Host MUI mode" })
       ).toHaveText("dark");
       await exerciseCandidate(page);
     } else if (variant === "missing-css") {
       const graph = page.getByRole("region", {
         name: "Application graph",
-        exact: true,
+        exact: true
       });
       await expect(graph.locator('[data-radius-part="node"]')).toHaveCount(2);
       const measured = await cards(graph);
       save(join(output, "missing-css-geometry.json"), measured);
       assert.throws(
         () => validateCardGeometry(measured),
-        /220px graph card geometry/,
+        /220px graph card geometry/
       );
     }
     await page.screenshot({
       path: join(output, `${variant}.png`),
       fullPage: true,
-      timeout: 30_000,
+      timeout: 30_000
     });
     assert.ok(
       requests.some((url) => /plugins.*main\.js/.test(url)),
-      "The actual Headlamp loader must request the plugin",
+      "The actual Headlamp loader must request the plugin"
     );
     for (const url of requests)
       assert.equal(
         new URL(url).origin,
         origin,
-        `Unexpected external request: ${url}`,
+        `Unexpected external request: ${url}`
       );
     assert.deepEqual(
       errors,
       [],
-      "The actual Headlamp page must not report JavaScript errors",
+      "The actual Headlamp page must not report JavaScript errors"
     );
     assert.deepEqual(
       consoleErrors.filter((message) =>
-        /Plugin (?:execution|initialize\(\)) error/.test(message),
+        /Plugin (?:execution|initialize\(\)) error/.test(message)
       ),
       [],
-      "Headlamp must not catch and suppress a plugin initialization error",
+      "Headlamp must not catch and suppress a plugin initialization error"
     );
     assert.ok(requests.includes(`${origin}/assets/${HEADLAMP_GRAPHVIEW_CSS}`));
     return { peer, sample };
@@ -507,16 +507,16 @@ async function hostScenario({
       await page.screenshot({
         path: join(output, `${variant}-failure.png`),
         fullPage: true,
-        timeout: 30_000,
+        timeout: 30_000
       });
       writeFileSync(
         join(output, `${variant}-failure.html`),
-        await page.content(),
+        await page.content()
       );
     } catch (diagnosticError) {
       writeFileSync(
         join(output, `${variant}-diagnostic-error.log`),
-        String(diagnosticError),
+        String(diagnosticError)
       );
     }
     throw error;
@@ -524,7 +524,7 @@ async function hostScenario({
     save(join(output, `browser-${variant}.json`), {
       requests,
       errors,
-      consoleErrors,
+      consoleErrors
     });
     await context.tracing.stop({ path: join(output, `${variant}-trace.zip`) });
     await context.close();
@@ -534,7 +534,7 @@ async function hostScenario({
         once(server, "exit"),
         setTimeout(5_000).then(() => {
           if (server.exitCode === null) server.kill("SIGKILL");
-        }),
+        })
       ]);
     }
     log.end();
@@ -562,31 +562,31 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
     npm_config_registry: "http://127.0.0.1:9",
     npm_config_ignore_scripts: "true",
     npm_config_userconfig: join(work, "empty.npmrc"),
-    npm_config_globalconfig: join(work, "empty-global.npmrc"),
+    npm_config_globalconfig: join(work, "empty-global.npmrc")
   };
   writeFileSync(env.npm_config_userconfig, "");
   writeFileSync(env.npm_config_globalconfig, "");
   writeFileSync(
     join(work, "empty-kubeconfig"),
-    'apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\ncurrent-context: ""\n',
+    'apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\ncurrent-context: ""\n'
   );
   const require = createRequire(join(fixture, "package.json"));
   const versions = Object.fromEntries(
     Object.keys(TOOL_VERSIONS).map((name) => [
       name,
-      json(join(fixture, "node_modules", name, "package.json")).version,
-    ]),
+      json(join(fixture, "node_modules", name, "package.json")).version
+    ])
   );
   assert.deepEqual(versions, TOOL_VERSIONS);
   const tool = dirname(
-    require.resolve("@kinvolk/headlamp-plugin/package.json"),
+    require.resolve("@kinvolk/headlamp-plugin/package.json")
   );
   const configs = ["plugins-tsconfig.json", "vite.config.mjs"];
   const configHashes = Object.fromEntries(
     configs.map((name) => [
       name,
-      hash(readFileSync(join(tool, "config", name))),
-    ]),
+      hash(readFileSync(join(tool, "config", name)))
+    ])
   );
   let candidates = seeds;
   const receipt = {
@@ -600,13 +600,13 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
     graphViewCss: {
       file: HEADLAMP_GRAPHVIEW_CSS,
       sha256: hash(
-        readFileSync(join("/headlamp/frontend/assets", HEADLAMP_GRAPHVIEW_CSS)),
-      ),
+        readFileSync(join("/headlamp/frontend/assets", HEADLAMP_GRAPHVIEW_CSS))
+      )
     },
     offline: true,
     scope: auditCss ? "outgoing-css-audit-only" : "full-compatibility",
     result: "in_progress",
-    candidateTarballs: {},
+    candidateTarballs: {}
   };
   save(join(output, "receipt.json"), receipt);
   if (!candidates) {
@@ -617,7 +617,7 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
       ["scripts/build-libraries.mjs"],
       root,
       env,
-      join(output, "library-build.log"),
+      join(output, "library-build.log")
     );
     for (const name of ["core", "graph-react"]) {
       run(
@@ -625,21 +625,21 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
         ["pack", "--pack-destination", candidates],
         join(root, "packages", name),
         env,
-        join(output, `pack-${name}.log`),
+        join(output, `pack-${name}.log`)
       );
     }
   }
   for (const name of ["core", "graph-react"]) {
     const files = readdirSync(candidates).filter(
       (file) =>
-        file.startsWith(`radius-project-${name}-`) && file.endsWith(".tgz"),
+        file.startsWith(`radius-project-${name}-`) && file.endsWith(".tgz")
     );
     assert.equal(files.length, 1, `Expected one ${name} candidate`);
     const tarball = join(candidates, files[0]);
     cpSync(tarball, join(savedCandidates, files[0]));
     receipt.candidateTarballs[name] = {
       file: files[0],
-      sha256: hash(readFileSync(tarball)),
+      sha256: hash(readFileSync(tarball))
     };
     const tar = require("tar");
     const entries = [];
@@ -649,7 +649,7 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
       onReadEntry: (entry) => {
         entries.push(entry.path);
         types.push(entry.type);
-      },
+      }
     });
     validateTarEntries(entries, types);
     save(join(output, `tar-${name}.json`), { entries, types });
@@ -664,18 +664,18 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
         "--strip-components=1",
         "-C",
         installed,
-        "--no-same-owner",
+        "--no-same-owner"
       ],
       root,
       env,
-      join(output, `extract-${name}.log`),
+      join(output, `extract-${name}.log`)
     );
     assert.equal(lstatSync(installed).isSymbolicLink(), false);
     assert.equal(realpathSync(installed), installed);
     assert.equal(existsSync(join(installed, "src")), false);
   }
   const core = json(
-    join(fixture, "node_modules", "@radius-project", "core", "package.json"),
+    join(fixture, "node_modules", "@radius-project", "core", "package.json")
   );
   const graph = json(
     join(
@@ -683,8 +683,8 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
       "node_modules",
       "@radius-project",
       "graph-react",
-      "package.json",
-    ),
+      "package.json"
+    )
   );
   assert.equal(graph.dependencies["@radius-project/core"], core.version);
   const graphRequire = createRequire(
@@ -693,8 +693,8 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
       "node_modules",
       "@radius-project",
       "graph-react",
-      "package.json",
-    ),
+      "package.json"
+    )
   );
   for (const name of ["react", "react-dom", "@radius-project/core/graph"])
     assert.equal(graphRequire.resolve(name), require.resolve(name));
@@ -704,7 +704,7 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
   const original = readFileSync(index, "utf8");
   const baselineSource = readFileSync(
     join(fixture, "src", "baseline.tsx"),
-    "utf8",
+    "utf8"
   );
   if (auditCss) writeFileSync(index, baselineSource);
   let typecheck;
@@ -714,7 +714,7 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
       [require.resolve("typescript/bin/tsc"), "--noEmit", "--listFiles"],
       fixture,
       env,
-      join(output, "plugin-typecheck.log"),
+      join(output, "plugin-typecheck.log")
     );
   } finally {
     writeFileSync(index, original);
@@ -722,25 +722,25 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
   for (const path of typecheck.trim().split("\n")) {
     assert.ok(
       path.startsWith(`${fixture}/`),
-      `Workspace declarations leaked into Headlamp plugin: ${path}`,
+      `Workspace declarations leaked into Headlamp plugin: ${path}`
     );
   }
   const bundles = {};
   try {
-    for (const [variant, source] of auditCss
-      ? [["baseline", baselineSource]]
-      : [
-          ["baseline", baselineSource],
-          ["missing-css", withoutCandidateStyles(original)],
-          ["candidate", original],
-        ]) {
+    for (const [variant, source] of auditCss ?
+      [["baseline", baselineSource]]
+    : [
+        ["baseline", baselineSource],
+        ["missing-css", withoutCandidateStyles(original)],
+        ["candidate", original]
+      ]) {
       writeFileSync(index, source);
       run(
         process.execPath,
         [join(tool, "bin", "headlamp-plugin.js"), "build"],
         fixture,
         env,
-        join(output, `plugin-build-${variant}.log`),
+        join(output, `plugin-build-${variant}.log`)
       );
       const bundle = join(output, `${variant}-main.js`);
       cpSync(join(fixture, "dist", "main.js"), bundle);
@@ -752,7 +752,7 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
   for (const name of configs)
     assert.equal(
       hash(readFileSync(join(tool, "config", name))),
-      configHashes[name],
+      configHashes[name]
     );
   const browser = await chromium.launch({ headless: true, env });
   receipt.chromium = browser.version();
@@ -762,19 +762,19 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
       ...args,
       variant: "baseline",
       bundle: bundles.baseline,
-      auditCss,
+      auditCss
     });
     if (!auditCss) {
       await hostScenario({
         ...args,
         variant: "missing-css",
-        bundle: bundles["missing-css"],
+        bundle: bundles["missing-css"]
       });
       await hostScenario({
         ...args,
         variant: "candidate",
         bundle: bundles.candidate,
-        baseline,
+        baseline
       });
     }
     receipt.result = auditCss ? "measured" : "passed";
@@ -785,7 +785,7 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
   }
   if (!auditCss)
     console.log(
-      `Headlamp ${HEADLAMP_IMAGE}: plugin build, real host, Flow 12 isolation, keyboard, source links, theme, navigation, teardown, and missing-CSS negative control passed.`,
+      `Headlamp ${HEADLAMP_IMAGE}: plugin build, real host, Flow 12 isolation, keyboard, source links, theme, navigation, teardown, and missing-CSS negative control passed.`
     );
 }
 

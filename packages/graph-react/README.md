@@ -53,7 +53,7 @@ The host owns loading, retrieval failures, connection selection, permissions, an
 
 The public component's discriminant selects the mode. Legacy boolean mode flags are confined to presentation helpers and the thin Canvas compatibility adapter.
 
-`normalizeLiveGraph(payload, context, options?)` accepts an unknown payload and validates essential fields. UCP `Outbound` is presented as target-to-owner, and `Inbound` as owner-to-target. The optional `legacyGatewayDirection` correction applies only to `Applications.Core/gateways`; it is off by default. Normalization never mutates the original payload or changes the meaning of its connection records.
+`normalizeLiveGraph(payload, context)` accepts an unknown payload and validates essential fields. UCP `Outbound` is presented as target-to-owner, and `Inbound` as owner-to-target. Direction comes from the payload alone — no resource type is special-cased, so only the `Radius.*` types the control plane serves are supported. Normalization never mutates the original payload or changes the meaning of its connection records.
 
 Identical duplicate resource records are coalesced with a diagnostic. Conflicting duplicate records fail explicitly. Malformed, missing-target, and self-referential connections are omitted with actionable diagnostics; surviving resources remain visible. The no-self-loop rule follows the authoritative dashboard plan's GU-06 intended invariant, which records the incumbent self-loop as a known defect. Reciprocal connections producing the same presentation edge are deduplicated.
 

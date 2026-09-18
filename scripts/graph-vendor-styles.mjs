@@ -10,7 +10,7 @@ export const scopedFlowStylesPath = join(
   "packages",
   "graph-react",
   "src",
-  "flow.css",
+  "flow.css"
 );
 
 // Renames a vendor keyframe so a scoped copy of the stylesheet cannot capture
@@ -22,7 +22,7 @@ export const scopedFlowStylesPath = join(
 export function renameKeyframes(css, from, to) {
   const count = (pattern) => (css.match(pattern) ?? []).length;
   const declarations = count(
-    new RegExp(`@(?:-webkit-)?keyframes\\s+${from}\\b`, "g"),
+    new RegExp(`@(?:-webkit-)?keyframes\\s+${from}\\b`, "g")
   );
   const references = count(new RegExp(`animation:[^;{}]*\\b${from}\\b`, "g"));
   assert.ok(declarations > 0, `Expected a ${from} keyframes declaration`);
@@ -30,7 +30,7 @@ export function renameKeyframes(css, from, to) {
   assert.equal(
     count(new RegExp(`\\b${from}\\b`, "g")),
     declarations + references,
-    `Unreviewed ${from} occurrence outside a keyframes declaration or animation`,
+    `Unreviewed ${from} occurrence outside a keyframes declaration or animation`
   );
   return css.replaceAll(from, to);
 }
@@ -51,7 +51,7 @@ ${renameKeyframes(css.trim(), "dashdraw", "radius-graph-dashdraw")}
 
 export function expectedScopedFlowStyles() {
   const fromGraph = createRequire(
-    join(repoRoot, "packages", "graph-react", "package.json"),
+    join(repoRoot, "packages", "graph-react", "package.json")
   );
   const cssPath = fromGraph.resolve("reactflow/dist/style.css");
   const root = resolve(dirname(cssPath), "..");
@@ -59,7 +59,7 @@ export function expectedScopedFlowStyles() {
   assert.equal(manifest.version, "11.11.4");
   return scopeFlowStyles(
     readFileSync(cssPath, "utf8"),
-    readFileSync(join(root, "LICENSE"), "utf8"),
+    readFileSync(join(root, "LICENSE"), "utf8")
   );
 }
 

@@ -13,7 +13,7 @@ export const TOOL_VERSIONS = {
   "@types/react-dom": "18.3.7",
   "@xyflow/react": "12.10.2",
   typescript: "5.6.2",
-  reactflow: "11.11.4",
+  reactflow: "11.11.4"
 };
 
 export function hash(bytes) {
@@ -26,7 +26,7 @@ export function containedPath(root, path) {
     difference !== "" &&
       !difference.startsWith("..") &&
       !isAbsolute(difference),
-    `Qualification path must be inside the repository: ${path}`,
+    `Qualification path must be inside the repository: ${path}`
   );
   return path;
 }
@@ -36,7 +36,7 @@ export function withoutCandidateStyles(source) {
   assert.equal(
     source.split(statement).length,
     2,
-    "Expected one candidate CSS import",
+    "Expected one candidate CSS import"
   );
   return source.replace(statement, "");
 }
@@ -46,18 +46,18 @@ export function validateTarEntries(entries, types = entries.map(() => "File")) {
   assert.equal(
     types.length,
     entries.length,
-    "Every tar entry must have a type",
+    "Every tar entry must have a type"
   );
   for (const [index, entry] of entries.entries()) {
     assert.ok(
       types[index] === "File" || types[index] === "Directory",
-      `Candidate tarball must not contain links or devices: ${entry}`,
+      `Candidate tarball must not contain links or devices: ${entry}`
     );
     assert.ok(
       entry.startsWith("package/") &&
         !entry.includes("\\") &&
         !entry.split("/").includes(".."),
-      `Unsafe candidate tarball entry: ${entry}`,
+      `Unsafe candidate tarball entry: ${entry}`
     );
   }
 }
@@ -66,7 +66,7 @@ export function validatePeerStyles(before, after) {
   assert.deepEqual(
     after,
     before,
-    "Radius CSS changed the real Headlamp Flow 12 controls",
+    "Radius CSS changed the real Headlamp Flow 12 controls"
   );
 }
 
@@ -74,20 +74,20 @@ export function styleChanges(before, after) {
   assert.deepEqual(
     Object.keys(after),
     Object.keys(before),
-    "Style sample selectors must match",
+    "Style sample selectors must match"
   );
   const changes = [];
   for (const selector of Object.keys(before)) {
     assert.equal(
       after[selector].length,
       before[selector].length,
-      "Style sample element counts must match",
+      "Style sample element counts must match"
     );
     for (const [index, properties] of before[selector].entries()) {
       assert.deepEqual(
         Object.keys(after[selector][index]),
         Object.keys(properties),
-        "Style sample properties must match",
+        "Style sample properties must match"
       );
       for (const property of Object.keys(properties)) {
         if (properties[property] !== after[selector][index][property]) {
@@ -96,7 +96,7 @@ export function styleChanges(before, after) {
             index,
             property,
             before: properties[property],
-            after: after[selector][index][property],
+            after: after[selector][index][property]
           });
         }
       }
@@ -115,13 +115,13 @@ export function validateBundledLayout(resolve, dependencies = {}) {
     assert.equal(
       dependencies[name],
       undefined,
-      `The candidate must bundle ${name} rather than declare it as a dependency`,
+      `The candidate must bundle ${name} rather than declare it as a dependency`
     );
   for (const name of ["dagre", "graphlib"])
     assert.throws(
       () => resolve(name),
       /Cannot find module/,
-      `The candidate must bundle ${name} instead of resolving a host copy`,
+      `The candidate must bundle ${name} instead of resolving a host copy`
     );
 }
 
@@ -134,7 +134,7 @@ export function validateHostSample(before, after, when) {
   assert.deepEqual(
     changes,
     [],
-    `Radius CSS ${when} the host changed the real Headlamp Flow 12 graph: ${JSON.stringify(changes)}`,
+    `Radius CSS ${when} the host changed the real Headlamp Flow 12 graph: ${JSON.stringify(changes)}`
   );
 }
 
@@ -144,7 +144,7 @@ export function validateCardGeometry(cards) {
     assert.equal(
       card.cssWidth,
       "220px",
-      "Candidate CSS must supply the 220px graph card geometry",
+      "Candidate CSS must supply the 220px graph card geometry"
     );
     assert.ok(
       [
@@ -153,13 +153,13 @@ export function validateCardGeometry(cards) {
         card.top,
         card.bottom,
         card.width,
-        card.height,
+        card.height
       ].every(Number.isFinite),
-      "Graph geometry must be finite",
+      "Graph geometry must be finite"
     );
     assert.ok(
       card.width > 100 && card.height > 50,
-      "Graph cards must be visible",
+      "Graph cards must be visible"
     );
   }
   const [first, second] = cards;
@@ -168,6 +168,6 @@ export function validateCardGeometry(cards) {
       second.right <= first.left ||
       first.bottom <= second.top ||
       second.bottom <= first.top,
-    "Graph cards must not overlap",
+    "Graph cards must not overlap"
   );
 }

@@ -25,7 +25,7 @@ const sampleResources = [
   {
     id: "app/web",
     name: "web",
-    type: "Applications.Core/containers",
+    type: "Radius.Compute/containers",
     connections: []
   }
 ];

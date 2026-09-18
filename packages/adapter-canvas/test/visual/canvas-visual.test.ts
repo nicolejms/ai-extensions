@@ -276,9 +276,7 @@ async function routeDeployments(
 const INVENTORY_RESOURCES = Array.from({ length: 10 }, (_, index) => ({
   name: `reported-resource-${index + 1}`,
   type:
-    index % 2 === 0 ?
-      "Applications.Core/containers"
-    : "Applications.Datastores/redisCaches"
+    index % 2 === 0 ? "Radius.Compute/containers" : "Radius.Data/redisCaches"
 }));
 
 async function routeDeletionInventory(

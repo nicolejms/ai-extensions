@@ -45,19 +45,15 @@ export function graphContextKey(context: GraphContext): string {
   ]);
 }
 
-export interface LiveGraphOptions {
-  /** Only the legacy UCP payload needs the Applications.Core/gateways workaround. */
-  legacyGatewayDirection?: boolean;
-}
-
 /**
  * Normalize UCP's dependency direction to source -> target renderer edges.
- * No modeled hashes, Canvas visualization filter, or workflow status projection.
+ * Direction is read from the payload alone: no resource type is special-cased,
+ * so only the `Radius.*` types the control plane serves are supported. No
+ * modeled hashes, Canvas visualization filter, or workflow status projection.
  */
 export function normalizeLiveGraph(
   value: unknown,
-  context: GraphContext,
-  options: LiveGraphOptions = {}
+  context: GraphContext
 ): LiveGraph {
   graphContextKey(context);
   if (!record(value) || !Array.isArray(value.resources)) {
@@ -114,8 +110,11 @@ export function normalizeLiveGraph(
         warnings.push(`Invalid connection ignored on ${owner}`);
         continue;
       }
-      const identity = parseResourceId(entry.id);
-      if (!identity || !ids.has(entry.id) || entry.id === owner) {
+      if (
+        !parseResourceId(entry.id) ||
+        !ids.has(entry.id) ||
+        entry.id === owner
+      ) {
         warnings.push(
           `Unresolved or self connection ignored: ${owner} -> ${entry.id}`
         );
@@ -126,11 +125,7 @@ export function normalizeLiveGraph(
           `Invalid live graph connection direction on ${owner}`
         );
       }
-      const legacyGateway =
-        options.legacyGatewayDirection === true &&
-        entry.direction === "Inbound" &&
-        identity.type === "Applications.Core/gateways";
-      const inbound = entry.direction === "Inbound" && !legacyGateway;
+      const inbound = entry.direction === "Inbound";
       const source = inbound ? owner : entry.id;
       const target = inbound ? entry.id : owner;
       edges.set(JSON.stringify([source, target]), { source, target });
