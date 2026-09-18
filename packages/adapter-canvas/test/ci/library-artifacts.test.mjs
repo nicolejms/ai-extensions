@@ -22,7 +22,10 @@ function manifest() {
     license: "Apache-2.0",
     type: "module",
     typesVersions: {
-      "*": { presentation: ["dist/presentation.d.ts"] }
+      "*": {
+        presentation: ["dist/presentation.d.ts"],
+        brand: ["dist/brand.d.ts"]
+      }
     },
     exports: {
       ".": {
@@ -34,6 +37,11 @@ function manifest() {
         types: "./dist/presentation.d.ts",
         import: "./dist/presentation.js",
         default: "./dist/presentation.js"
+      },
+      "./brand": {
+        types: "./dist/brand.d.ts",
+        import: "./dist/brand.js",
+        default: "./dist/brand.js"
       },
       "./base.css": "./dist/base.css",
       "./styles.css": "./dist/styles.css",

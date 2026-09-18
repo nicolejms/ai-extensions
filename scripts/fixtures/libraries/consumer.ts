@@ -6,6 +6,11 @@ import {
   resolveGraphSettings
 } from "@radius-project/graph-react/presentation";
 import {
+  RADIUS_BRAND_MARK,
+  radiusBrandMarkSvg
+} from "@radius-project/graph-react/brand";
+import type { RadiusBrandMark } from "@radius-project/graph-react/brand";
+import {
   graphContextKey,
   normalizeLiveGraph
 } from "@radius-project/core/graph";
@@ -17,7 +22,7 @@ const context: GraphContext = {
   connectionId: "packed-consumer",
   plane: { type: "radius", name: "local" },
   applicationId:
-    "/planes/radius/local/resourceGroups/demo/providers/Applications.Core/applications/demo"
+    "/planes/radius/local/resourceGroups/demo/providers/Radius.Core/applications/demo"
 };
 const graph: RadiusGraphData = normalizeLiveGraph({ resources: [] }, context);
 const identity: ResourceId | undefined = parseResourceId(context.applicationId);
@@ -37,12 +42,15 @@ const custom = createElement(RadiusGraph, {
 });
 const themed = createElement(RadiusGraph, { graph, appearance: "default" });
 const built = buildGraph(resolveGraphSettings(), []);
+const mark: RadiusBrandMark = RADIUS_BRAND_MARK;
 void [
   identity,
   element,
   custom,
   themed,
   built,
+  mark,
+  radiusBrandMarkSvg({ size: 26, title: "Radius" }),
   graphContextKey(context),
   mountRadiusGraph
 ];
@@ -50,6 +58,11 @@ void [
 // The narrow npm package must not expose the internal Node-facing root.
 // @ts-expect-error Internal core APIs are intentionally not public exports.
 import "@radius-project/core/modeling";
+
+// The published mark is a readonly contract, so one host cannot mutate the
+// shared definition out from under another.
+// @ts-expect-error The brand mark body is readonly.
+RADIUS_BRAND_MARK.body = "";
 
 const invalid: RadiusGraphProps = {
   // @ts-expect-error Renderer inputs must satisfy the public discriminated contract.

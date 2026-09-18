@@ -179,11 +179,27 @@ The supported vendor hooks are `.radius-graph__edge .react-flow__edge-path`, `.r
 
 Changing `appearance`, `theme`, `className`, or a stylesheet does not rebuild graph data, reset the viewport, or replace open details. Style changes that substantially alter content height may require the user to fit the graph with the existing controls; they do not trigger an unsolicited viewport reset. The callback, keyboard, focus-restoration, status, and teardown contracts are the same in both appearances.
 
+## Brand mark
+
+Hosts that place Radius navigation entries beside the graph need the same mark the graph's own chrome uses. `@radius-project/graph-react/brand` is a React-free, DOM-free subpath so a host can register the icon without loading the renderer:
+
+```ts
+import { RADIUS_BRAND_MARK, radiusBrandMarkSvg } from "@radius-project/graph-react/brand";
+
+// Icon registries take a body plus a viewBox size.
+addIcon("radius:mark", RADIUS_BRAND_MARK);
+
+// Hosts that inline markup get a complete element instead.
+element.innerHTML = radiusBrandMarkSvg({ size: 26, title: "Radius" });
+```
+
+`radiusBrandMarkSvg` defaults to 28px and is decorative (`aria-hidden`) unless you pass `title`, which promotes it to `role="img"` with an accessible name. The mark paints with `var(--rad-brand)` and `var(--rad-brand-dark)` over Radius-orange fallbacks, so host tokens apply only when the markup is inlined into the document — not when it is loaded through `<img>` or a data URI.
+
 ## Packaging and provenance
 
-The package exports JavaScript and declarations, bundled `styles.css` and `base.css`, and a `presentation` subpath for typed graph presentation helpers. React and ReactDOM remain peers. Canvas bundles shared source into its existing self-contained browser artifact, ultimately `.artifacts/radius/com.github.copilot/extensions/radius/extension.mjs`; no package source is downloaded at runtime. Library release/version handling is separate from Copilot plugin discovery and release selection. No public registry publication is part of this implementation.
+The package exports JavaScript and declarations, bundled `styles.css` and `base.css`, a `presentation` subpath for typed graph presentation helpers, and a `brand` subpath for the Radius mark. React and ReactDOM remain peers. Canvas bundles shared source into its existing self-contained browser artifact, ultimately `.artifacts/radius/com.github.copilot/extensions/radius/extension.mjs`; no package source is downloaded at runtime. Library release/version handling is separate from Copilot plugin discovery and release selection. No public registry publication is part of this implementation.
 
-`core/graph`, `core/domain`, and `graph-react/presentation` also provide `typesVersions` mappings for classic TypeScript Node resolution. Modern NodeNext/Bundler consumers continue using the existing `exports` map. Consumers do not need path aliases to the source tree or a compiler upgrade to resolve these declarations.
+`core/graph`, `core/domain`, `graph-react/presentation`, and `graph-react/brand` also provide `typesVersions` mappings for classic TypeScript Node resolution. Modern NodeNext/Bundler consumers continue using the existing `exports` map. Consumers do not need path aliases to the source tree or a compiler upgrade to resolve these declarations.
 
 `src/flow.css` is generated from the pinned React Flow 11 stylesheet, with its MIT license retained, a graph scope, and namespaced keyframes. It is not independently maintained vendor behavior. After reviewing a vendor update, regenerate it with `node scripts/graph-vendor-styles.mjs`; `--check` and the artifact tests detect drift. Keeping this asset in source ensures Vite consumers, the synchronous Canvas browser build, and packed libraries all use exactly the same rules.
 

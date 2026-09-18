@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./presentation": "./src/presentation.ts",
+    "./brand": "./src/brand.ts",
     "./styles.css": "./src/styles.css",
     "./base.css": "./src/base.css"
   },
@@ -18,6 +19,9 @@
     "*": {
       "presentation": [
         "dist/presentation.d.ts"
+      ],
+      "brand": [
+        "dist/brand.d.ts"
       ]
     }
   },
@@ -38,6 +42,11 @@
         "types": "./dist/presentation.d.ts",
         "import": "./dist/presentation.js",
         "default": "./dist/presentation.js"
+      },
+      "./brand": {
+        "types": "./dist/brand.d.ts",
+        "import": "./dist/brand.js",
+        "default": "./dist/brand.js"
       },
       "./styles.css": "./dist/styles.css",
       "./base.css": "./dist/base.css",
