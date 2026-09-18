@@ -22,6 +22,7 @@
   },
   "ignore": [
     "@radius-project/adapter-shared",
-    "@radius-project/adapter-canvas"
+    "@radius-project/adapter-canvas",
+    "@radius-project/adapter-claude"
   ]
 }

@@ -1,0 +1,13 @@
+{
+  "name": "radius",
+  "version": "0.1.0",
+  "description": "Model and visualize Radius applications in Claude Code.",
+  "author": {
+    "name": "Radius",
+    "url": "https://github.com/radius-project"
+  },
+  "repository": "https://github.com/nicolejms/ai-extensions",
+  "homepage": "https://radapp.io",
+  "license": "Apache-2.0",
+  "keywords": ["radius", "application-graph", "bicep", "mcp-app"]
+}

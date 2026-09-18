@@ -4,7 +4,7 @@ import globals from "globals";
 
 const sourceFiles = [
   "eslint.config.mjs",
-  "packages/**/*.{ts,mjs}",
+  "packages/**/*.{ts,tsx,mjs}",
   "extensions/radius/skills/**/*.mjs",
   "scripts/**/*.mjs",
   "vitest.config.ts"
@@ -29,7 +29,7 @@ const restrictedCoreImports = [
 
 export default [
   {
-    ignores: [".artifacts/**"]
+    ignores: [".artifacts/**", "**/dist/**"]
   },
   {
     files: sourceFiles,
@@ -64,6 +64,24 @@ export default [
         requireConfigFile: false,
         babelOptions: {
           plugins: ["@babel/plugin-syntax-typescript"]
+        }
+      }
+    },
+    rules: {
+      "no-undef": "off",
+      "no-unused-vars": "off"
+    }
+  },
+  {
+    files: ["**/*.tsx"],
+    languageOptions: {
+      parser: babelParser,
+      parserOptions: {
+        requireConfigFile: false,
+        babelOptions: {
+          parserOpts: {
+            plugins: ["typescript", "jsx"]
+          }
         }
       }
     },

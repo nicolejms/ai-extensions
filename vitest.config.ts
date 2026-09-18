@@ -5,7 +5,8 @@ export default defineConfig({
   test: {
     projects: [
       "packages/*/vitest.config.ts",
-      "packages/graph-react/vitest.component.config.ts"
+      "packages/graph-react/vitest.component.config.ts",
+      "packages/adapter-claude/vitest.component.config.ts"
     ],
     coverage: {
       provider: "v8",
