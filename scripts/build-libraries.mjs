@@ -1,11 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { build } from "esbuild";
 import { repoRoot } from "./plugins.mjs";
 import {
   validateBuildBoundary,
+  libraryExternalImports,
   validateStylesheetBoundary
 } from "./library-artifacts.mjs";
 
@@ -17,7 +18,7 @@ const compiler = join(
 );
 const packages = [
   { directory: "core", entries: ["graph/index", "domain/index"] },
-  { directory: "graph-react", entries: ["index", "presentation"] }
+  { directory: "graph-react", entries: ["index", "presentation", "brand"] }
 ];
 
 for (const { directory, entries } of packages) {
@@ -43,11 +44,26 @@ for (const { directory, entries } of packages) {
     splitting: true,
     format: "esm",
     platform: "browser",
-    packages: "external",
+    external: libraryExternalImports(directory),
     target: "es2022",
     metafile: true
   });
-  validateBuildBoundary(built.metafile, directory);
+  const bundledRoots = validateBuildBoundary(built.metafile, directory);
+  if (bundledRoots.size > 0) {
+    const notices = await Promise.all(
+      [...bundledRoots].sort().map(async (dependency) => {
+        const directory = join(root, dependency);
+        const manifest = JSON.parse(
+          await readFile(join(directory, "package.json"), "utf8")
+        );
+        return `${manifest.name}@${manifest.version}\n\n${await readFile(join(directory, "LICENSE"), "utf8")}`;
+      })
+    );
+    await writeFile(
+      join(outdir, "THIRD_PARTY_NOTICES.txt"),
+      notices.join("\n\n")
+    );
+  }
   // Keep the boundary audit beside the candidate, not in its public package.
   await mkdir(join(repoRoot, ".artifacts", "libraries"), { recursive: true });
   await writeFile(
@@ -56,18 +72,27 @@ for (const { directory, entries } of packages) {
   );
   await copyFile(join(repoRoot, "LICENSE"), join(outdir, "LICENSE"));
   if (directory === "graph-react") {
-    const stylesheet = await build({
-      absWorkingDir: root,
-      entryPoints: ["src/styles.css"],
-      outfile: join(outdir, "styles.css"),
-      bundle: true,
-      target: "es2022",
-      metafile: true
-    });
-    validateStylesheetBoundary(stylesheet.metafile);
-    await writeFile(
-      join(repoRoot, ".artifacts", "libraries", "graph-react-css-build.json"),
-      `${JSON.stringify(stylesheet.metafile, null, 2)}\n`
-    );
+    for (const entry of ["base.css", "styles.css"]) {
+      const stylesheet = await build({
+        absWorkingDir: root,
+        entryPoints: [`src/${entry}`],
+        outfile: join(outdir, entry),
+        bundle: true,
+        target: "es2022",
+        metafile: true
+      });
+      validateStylesheetBoundary(stylesheet.metafile, entry);
+      await writeFile(
+        join(
+          repoRoot,
+          ".artifacts",
+          "libraries",
+          entry === "base.css" ?
+            "graph-react-base-css-build.json"
+          : "graph-react-css-build.json"
+        ),
+        `${JSON.stringify(stylesheet.metafile, null, 2)}\n`
+      );
+    }
   }
 }

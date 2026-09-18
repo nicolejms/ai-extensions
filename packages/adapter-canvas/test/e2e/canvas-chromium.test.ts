@@ -185,7 +185,7 @@ async function seed(canvas: CanvasHarness): Promise<void> {
     [
       "extension radius",
       "",
-      "resource app 'Applications.Core/applications@2023-10-01-preview' = {",
+      "resource app 'Radius.Core/applications@2023-10-01-preview' = {",
       "  name: 'radius-app'",
       "}"
     ].join("\n"),
@@ -3065,7 +3065,7 @@ test.describe("Radius Canvas in Chromium", () => {
       { length: DELETE_DIALOG_RESOURCE_LIMIT + 3 },
       (_, index) => ({
         name: index === 0 ? hostileName : `reported-resource-${index}`,
-        type: "Applications.Core/containers"
+        type: "Radius.Compute/containers"
       })
     );
     await page.route("**/api/deployed-graph**", async (route) => {
@@ -3113,7 +3113,7 @@ test.describe("Radius Canvas in Chromium", () => {
     await expect(list.locator("img")).toHaveCount(0);
     await expect(list).not.toContainText("never-deployed");
     await expect(list).toContainText("+3 more");
-    await expect(list).toContainText("Applications.Core/containers");
+    await expect(list).toContainText("Radius.Compute/containers");
     const next = dialog.getByRole("button", {
       name: /have read and understand/i
     });

@@ -49,7 +49,7 @@ describe("live UCP graph normalization", () => {
       warnings: []
     });
   });
-  it.each(["Applications.Core", "Radius.Core"])(
+  it.each(["Radius.Compute", "Radius.Networking"])(
     "normalizes %s Outbound as target -> owner without mutating source meaning",
     (namespace) => {
       const resource = {
@@ -84,39 +84,11 @@ describe("live UCP graph normalization", () => {
     ]);
     expect(result.resources[1].connections).toEqual([]);
   });
-  it.each([false, true])(
-    "limits legacy gateway correction to the opt-in payload: %s",
-    (legacyGatewayDirection) => {
-      const gateway = {
-        id: id("Applications.Core/gateways", "gateway"),
-        name: "gateway",
-        type: "Applications.Core/gateways"
-      };
-      const result = normalizeLiveGraph(
-        {
-          resources: [
-            { ...web, connections: [{ id: gateway.id, direction: "Inbound" }] },
-            gateway
-          ]
-        },
-        context,
-        { legacyGatewayDirection }
-      );
-      expect(
-        result.resources[legacyGatewayDirection ? 1 : 0].connections
-      ).toEqual([
-        {
-          id: legacyGatewayDirection ? web.id : gateway.id,
-          direction: "Outbound"
-        }
-      ]);
-    }
-  );
-  it("never applies the legacy correction to Radius.Core gateways", () => {
+  it("applies no type-specific direction correction to gateways", () => {
     const gateway = {
-      id: id("Radius.Core/gateways", "gateway"),
+      id: id("Radius.Networking/gateways", "gateway"),
       name: "gateway",
-      type: "Radius.Core/gateways"
+      type: "Radius.Networking/gateways"
     };
     const result = normalizeLiveGraph(
       {
@@ -125,10 +97,12 @@ describe("live UCP graph normalization", () => {
           gateway
         ]
       },
-      context,
-      { legacyGatewayDirection: true }
+      context
     );
-    expect(result.resources[0].connections[0].id).toBe(gateway.id);
+    expect(result.resources[0].connections).toEqual([
+      { id: gateway.id, direction: "Outbound" }
+    ]);
+    expect(result.resources[1].connections).toEqual([]);
   });
   it("reports malformed, missing, and GU-06 self-connections without dropping valid resources", () => {
     const result = normalizeLiveGraph(

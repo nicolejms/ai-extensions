@@ -205,7 +205,7 @@ describe("radiusGetIconSvg", () => {
   it("selects an icon per resource family", () => {
     expect(fillOf("Radius.Compute/containers")).toBe("#326ce5");
     expect(fillOf("aws.ecr/repository")).toBe("var(--rad-brand, #da4c2a)");
-    expect(fillOf("Applications.Core/gateways")).toBe("#8250df");
+    expect(fillOf("Radius.Networking/gateways")).toBe("#8250df");
     expect(fillOf("kubernetes/route")).toBe("#8250df");
     expect(fillOf("azure.dbformysql/servers")).toBe("#00758f");
     expect(fillOf("azure.dbforpostgresql/servers")).toBe("#336791");

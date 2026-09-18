@@ -15,13 +15,7 @@ import ReactFlow, {
   useNodesState
 } from "reactflow";
 import dagre from "dagre";
-import type {
-  CSSProperties,
-  KeyboardEvent,
-  MouseEvent,
-  ReactElement,
-  ReactNode
-} from "react";
+import type { KeyboardEvent, MouseEvent, ReactElement, ReactNode } from "react";
 import type { ReactFlowInstance } from "reactflow";
 import type {
   GraphResource,
@@ -46,15 +40,9 @@ import {
 } from "./legend.js";
 import { NodeInteractionContext, ResourceNode } from "./node.js";
 import type { GraphCallbacks } from "./callbacks.js";
-
-export interface GraphTheme {
-  background?: string;
-  text?: string;
-  mutedText?: string;
-  accent?: string;
-  fontFamily?: string;
-  colorScheme?: "light" | "dark";
-}
+import { graphStyle, styledEdges } from "./theme.js";
+import type { GraphStyle, GraphTheme } from "./theme.js";
+export type { GraphStyle, GraphTheme } from "./theme.js";
 
 export interface RadiusGraphProps {
   graph: RadiusGraphData;
@@ -63,9 +51,11 @@ export interface RadiusGraphProps {
     "liveMode" | "diffMode" | "deployMode" | "plannedMode"
   >;
   theme?: GraphTheme;
+  /** Use the default skin or let the host stylesheet own appearance. */
+  appearance?: "default" | "custom";
   callbacks?: GraphCallbacks;
   className?: string;
-  style?: CSSProperties;
+  style?: GraphStyle;
   ariaLabel?: string;
 }
 
@@ -91,6 +81,7 @@ interface OpenDetails {
 
 function GraphContent({
   graph,
+  appearance,
   options = EMPTY_OPTIONS,
   callbacks = EMPTY_CALLBACKS
 }: RadiusGraphProps): ReactElement {
@@ -117,7 +108,7 @@ function GraphContent({
     }));
     const result = buildGraph(settings, resources);
     const warning = layoutGraph(dagre, result.nodes, result.edges);
-    return { ...result, warning };
+    return { ...result, edges: styledEdges(result.edges), warning };
   }, [graph, settings]);
   const [nodes, setNodes, onNodesChange] = useNodesState<GraphNodeData>(
     built.nodes
@@ -267,8 +258,8 @@ function GraphContent({
     [openData, settings]
   );
   const interaction = useMemo(
-    () => ({ settings, callbacks: stableCallbacks, showDetails }),
-    [settings, stableCallbacks, showDetails]
+    () => ({ settings, callbacks: stableCallbacks, showDetails, appearance }),
+    [settings, stableCallbacks, showDetails, appearance]
   );
   const legend =
     !settings.showLegend || settings.diffMode ? ""
@@ -281,20 +272,29 @@ function GraphContent({
     legend ?
       h("div", {
         className: "legend",
+        "data-radius-part": "legend",
         dangerouslySetInnerHTML: { __html: legend }
       })
     : null,
     built.warning ?
       h(
         "div",
-        { role: "status", className: "radius-graph__warning" },
+        {
+          role: "status",
+          className: "radius-graph__warning",
+          "data-radius-part": "warning"
+        },
         built.warning
       )
     : null,
     graph.kind === "live" && graph.warnings.length > 0 ?
       h(
         "div",
-        { role: "status", className: "radius-graph__warning" },
+        {
+          role: "status",
+          className: "radius-graph__warning",
+          "data-radius-part": "warning"
+        },
         graph.warnings.join(" ")
       )
     : null,
@@ -302,6 +302,7 @@ function GraphContent({
       "div",
       {
         className: "radius-graph__viewport",
+        "data-radius-part": "viewport",
         ref: viewportRef,
         onClick: onViewportClick,
         onKeyDown: onViewportKeyDown
@@ -309,7 +310,11 @@ function GraphContent({
       built.nodes.length === 0 ?
         h(
           "div",
-          { role: "status", className: "radius-graph__empty" },
+          {
+            role: "status",
+            className: "radius-graph__empty",
+            "data-radius-part": "empty"
+          },
           "No resources in this application."
         )
       : h(
@@ -377,12 +382,20 @@ class GraphBoundary extends Component<
     if (!this.state.failed) return this.props.children;
     return h(
       "div",
-      { className: "radius-graph__error", role: "alert" },
+      {
+        className: "radius-graph__error",
+        role: "alert",
+        "data-radius-part": "error"
+      },
       "The application graph could not be rendered. ",
       this.props.onRetry ?
         h(
           "button",
-          { type: "button", onClick: this.props.onRetry },
+          {
+            type: "button",
+            onClick: this.props.onRetry,
+            "data-radius-part": "retry"
+          },
           "Reload graph"
         )
       : null
@@ -392,22 +405,13 @@ class GraphBoundary extends Component<
 
 /** The same controlled React tree is mounted by Canvas and npm consumers. */
 export function RadiusGraph(props: RadiusGraphProps): ReactElement {
-  const theme = props.theme;
-  const style: CSSProperties &
-    Record<`--radius-graph-${string}`, string | undefined> = {
-    ...props.style,
-    ...(theme?.colorScheme ? { colorScheme: theme.colorScheme } : {}),
-    "--radius-graph-background": theme?.background,
-    "--radius-graph-text": theme?.text,
-    "--radius-graph-muted": theme?.mutedText,
-    "--radius-graph-accent": theme?.accent,
-    "--radius-graph-font": theme?.fontFamily
-  };
   return h(
     "section",
     {
       className: `radius-graph${props.className ? ` ${props.className}` : ""}`,
-      style,
+      style: graphStyle(props.style, props.theme),
+      "data-radius-appearance": props.appearance ?? "default",
+      "data-radius-kind": props.graph.kind,
       "aria-label": props.ariaLabel || "Application graph"
     },
     h(

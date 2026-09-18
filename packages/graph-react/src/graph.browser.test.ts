@@ -659,7 +659,7 @@ describe("public host-neutral React API", () => {
     const hidden = element.querySelector<HTMLElement>("[data-radius-details]");
     expect(element.querySelectorAll("[data-radius-details]")).toHaveLength(1);
     expect(hidden?.style.display).toBe("none");
-    expect(hidden?.style.position).toBe("absolute");
+    expect(hidden && getComputedStyle(hidden).position).toBe("absolute");
     const panel = await openDetails(element, "web");
     expect(panel).toBe(hidden);
     const anchoredToWeb = panel.style.top;
@@ -903,9 +903,12 @@ describe("public host-neutral React API", () => {
     const failure = await openDetails(element, "web");
     expect(failure.querySelector("script")).toBeNull();
     expect(failure.textContent).toContain(message);
-    expect(failure.firstElementChild?.getAttribute("style")).toContain(
-      "--rad-danger"
+    expect(failure.firstElementChild?.getAttribute("data-radius-failure")).toBe(
+      "true"
     );
+    const failureColor =
+      failure.firstElementChild &&
+      getComputedStyle(failure.firstElementChild).color;
 
     // A message that is not a failure reads as ordinary secondary text.
     root.render(
@@ -924,9 +927,13 @@ describe("public host-neutral React API", () => {
       })
     );
     const succeeded = await openDetails(element, "api");
-    expect(succeeded.firstElementChild?.getAttribute("style")).toContain(
-      "--rad-text-secondary"
-    );
+    expect(
+      succeeded.firstElementChild?.getAttribute("data-radius-failure")
+    ).toBe("false");
+    expect(
+      succeeded.firstElementChild &&
+        getComputedStyle(succeeded.firstElementChild).color
+    ).not.toBe(failureColor);
 
     root.render(
       h(RadiusGraph, {
@@ -1347,11 +1354,20 @@ describe("graph view in a real browser", () => {
     // cannot make: React Flow only paints once it has measured its container.
     expect(web.getBoundingClientRect().width).toBeGreaterThan(0);
     expect(db.getBoundingClientRect().height).toBeGreaterThan(0);
-    expect(web.style.boxSizing).toBe("border-box");
-    expect(web.style.background).toBe("var(--rad-node-bg)");
-    expect(web.style.borderColor).toBe("var(--rad-node-border)");
-    expect(web.style.borderWidth).toBe("2.5px");
-    expect(web.style.borderStyle).toBe("solid");
+    const cardStyle = getComputedStyle(web);
+    expect(cardStyle.boxSizing).toBe("border-box");
+    expect(cardStyle.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+    expect(web.style.getPropertyValue("--rad-node-default-background")).toBe(
+      "var(--rad-node-bg)"
+    );
+    expect(web.style.getPropertyValue("--rad-node-default-border-color")).toBe(
+      "var(--rad-node-border)"
+    );
+    expect(web.style.getPropertyValue("--rad-node-default-border-width")).toBe(
+      "2.5px"
+    );
+    expect(cardStyle.borderWidth).toBe("2px");
+    expect(cardStyle.borderStyle).toBe("solid");
     expect(within(web).getByTitle("web").textContent).toBe("web");
     expect(web.querySelector(".rad-node__icon")?.getAttribute("src")).toMatch(
       /^data:image\/svg\+xml/

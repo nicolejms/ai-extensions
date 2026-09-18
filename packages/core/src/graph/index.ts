@@ -13,7 +13,6 @@ export {
 } from "./deployed.js";
 export type { DeployStatus } from "./deployed.js";
 export { graphContextKey, normalizeLiveGraph } from "./live.js";
-export type { LiveGraphOptions } from "./live.js";
 export type {
   GraphContext,
   GraphResource,

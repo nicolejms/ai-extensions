@@ -40,9 +40,9 @@ export function buildStatusLegendHtml(
   return STATUS_LEGEND_ITEMS.filter((item) => visibleKinds.has(item.kind))
     .map(
       (item) =>
-        '<div class="legend-item"><img src="' +
+        '<div class="legend-item" data-radius-part="legend-item"><img src="' +
         escapeBrowserHtml(radiusDeployBadgeSvg(item.kind)) +
-        '" width="14" height="14" style="vertical-align:middle;" alt="" />' +
+        '" width="14" height="14" data-radius-part="legend-icon" alt="" />' +
         escapeBrowserHtml(item.label) +
         "</div>"
     )
@@ -85,10 +85,10 @@ export function buildCategoryLegendHtml(
         category.icon ?
           '<img src="' +
           escapeBrowserHtml(category.icon) +
-          '" width="14" height="14" style="vertical-align:middle;" alt="" />'
-        : '<span style="display:inline-block;width:14px;height:14px;vertical-align:middle;"></span>';
+          '" width="14" height="14" data-radius-part="legend-icon" alt="" />'
+        : '<span data-radius-part="legend-icon"></span>';
       return (
-        '<div class="legend-item">' +
+        '<div class="legend-item" data-radius-part="legend-item">' +
         image +
         escapeBrowserHtml(category.name) +
         "</div>"

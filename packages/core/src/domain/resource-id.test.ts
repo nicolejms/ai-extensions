@@ -4,7 +4,7 @@ import { parseResourceId } from "./resource-id.js";
 const prefix = "/planes/radius/local/resourceGroups/team/providers/";
 
 describe("UCP resource identity", () => {
-  it.each(["Applications.Core", "Radius.Core", "Radius.Custom2"])(
+  it.each(["Radius.Compute", "Radius.Core", "Radius.Custom2"])(
     "preserves %s identity, punctuation and nested types",
     (provider) => {
       const id = `${prefix}${provider}/applications/app.one_2/children/child`;

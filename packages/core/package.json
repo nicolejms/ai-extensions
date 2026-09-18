@@ -16,6 +16,16 @@
   "files": [
     "dist"
   ],
+  "typesVersions": {
+    "*": {
+      "graph": [
+        "dist/graph/index.d.ts"
+      ],
+      "domain": [
+        "dist/domain/index.d.ts"
+      ]
+    }
+  },
   "publishConfig": {
     "access": "public",
     "main": "./dist/graph/index.js",

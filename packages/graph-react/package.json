@@ -8,11 +8,23 @@
   "exports": {
     ".": "./src/index.ts",
     "./presentation": "./src/presentation.ts",
-    "./styles.css": "./src/styles.css"
+    "./brand": "./src/brand.ts",
+    "./styles.css": "./src/styles.css",
+    "./base.css": "./src/base.css"
   },
   "files": [
     "dist"
   ],
+  "typesVersions": {
+    "*": {
+      "presentation": [
+        "dist/presentation.d.ts"
+      ],
+      "brand": [
+        "dist/brand.d.ts"
+      ]
+    }
+  },
   "sideEffects": [
     "**/*.css"
   ],
@@ -31,7 +43,13 @@
         "import": "./dist/presentation.js",
         "default": "./dist/presentation.js"
       },
+      "./brand": {
+        "types": "./dist/brand.d.ts",
+        "import": "./dist/brand.js",
+        "default": "./dist/brand.js"
+      },
       "./styles.css": "./dist/styles.css",
+      "./base.css": "./dist/base.css",
       "./package.json": "./package.json"
     }
   },
@@ -42,7 +60,6 @@
   },
   "dependencies": {
     "@radius-project/core": "workspace:*",
-    "dagre": "0.8.5",
     "reactflow": "11.11.4"
   },
   "peerDependencies": {
@@ -57,6 +74,7 @@
     "@types/react-dom": "^19.2.5",
     "@vitest/browser": "catalog:",
     "@vitest/browser-playwright": "^4.1.11",
+    "dagre": "0.8.5",
     "playwright": "^1.62.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",

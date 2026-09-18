@@ -235,7 +235,8 @@ jobs:
 
   build-gate:
     name: Shared release gate
-    needs: [static-checks, windows-process-integration, canvas-chromium, node-tests]
+    needs:
+      [static-checks, windows-process-integration, canvas-chromium, node-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
