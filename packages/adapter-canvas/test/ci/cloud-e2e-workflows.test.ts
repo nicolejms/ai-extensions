@@ -488,6 +488,7 @@ describe("cloud-e2e-cleanup.yml", () => {
       "entra-identity-cleanup",
       "deployment-records-cleanup",
       "environment-cleanup",
+      "stale-ghcr-state-cleanup",
       "ghcr-state-cleanup",
       "fallback-ref-cleanup"
     ])
@@ -542,6 +543,7 @@ describe("cloud-e2e-cleanup.yml", () => {
     );
     const script = stateCleanup?.run ?? "";
 
+    expect(stateCleanup?.id).toBe("stale-ghcr-state-cleanup");
     expect(stateCleanup?.if).toContain(
       "steps.radius-app-cleanup.outcome == 'success'"
     );

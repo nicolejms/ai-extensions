@@ -350,6 +350,7 @@ jobs:
       # so it inherits the App's whole installation grant - granting the App
       # Packages write here would hand package-write to the journey token too.
       - name: Purge stale GHCR deployment state
+        id: stale-ghcr-state-cleanup
         if: always() && steps.pin.outputs.provisioned == 'true' && steps.verify-scope.outputs.configured == 'true' && steps.app-token.outcome == 'success' && steps.radius-app-cleanup.outcome == 'success'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -1173,7 +1174,7 @@ jobs:
       # before touching the mutable default branch. Recovery workflows remain
       # in place unless every preceding sweep completed successfully.
       - name: Reset the fixture default branch under the shared lease
-        if: always() && steps.pin.outputs.provisioned == 'true' && steps.verify-scope.outputs.configured == 'true' && steps.app-token.outcome == 'success' && steps.cluster-workload-cleanup.outcome == 'success' && steps.shared-resource-cleanup.outcome == 'success' && steps.entra-identity-cleanup.outcome == 'success' && steps.deployment-records-cleanup.outcome == 'success' && steps.environment-cleanup.outcome == 'success' && steps.ghcr-state-cleanup.outcome == 'success' && steps.fallback-ref-cleanup.outcome == 'success'
+        if: always() && steps.pin.outputs.provisioned == 'true' && steps.verify-scope.outputs.configured == 'true' && steps.app-token.outcome == 'success' && steps.cluster-workload-cleanup.outcome == 'success' && steps.shared-resource-cleanup.outcome == 'success' && steps.entra-identity-cleanup.outcome == 'success' && steps.deployment-records-cleanup.outcome == 'success' && steps.environment-cleanup.outcome == 'success' && steps.stale-ghcr-state-cleanup.outcome == 'success' && steps.ghcr-state-cleanup.outcome == 'success' && steps.fallback-ref-cleanup.outcome == 'success'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           SOURCE_GH_TOKEN: ${{ github.token }}
