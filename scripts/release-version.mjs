@@ -9,12 +9,9 @@ import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  isMainModule,
-  listPlugins,
-  repoRoot,
-  requirePlugin
-} from "./plugins.mjs";
+
+import { isMainModule } from "./module-entry.mjs";
+import { listPlugins, repoRoot, requirePlugin } from "./plugins.mjs";
 
 const require = createRequire(import.meta.url);
 const CONFIG = ".changeset/config.json";

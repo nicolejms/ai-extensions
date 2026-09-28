@@ -8,13 +8,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { isMainModule } from "../../../../scripts/plugins.mjs";
 
-const SCRIPT = fileURLToPath(
-  new URL("../../../../scripts/plugins.mjs", import.meta.url)
-);
+const SCRIPTS = ["plugins.mjs", "module-entry.mjs"].map((name) => [
+  name,
+  fileURLToPath(new URL(`../../../../scripts/${name}`, import.meta.url))
+]);
 
 const temporaryRepositories = [];
 
@@ -32,8 +32,11 @@ function writeRepository(plugins) {
 
   mkdirSync(join(root, "scripts"));
   // The script resolves the repository from its own location, so exercising it
-  // against a fixture means copying it rather than running it in place.
-  copyFileSync(SCRIPT, join(root, "scripts", "plugins.mjs"));
+  // against a fixture means copying it, along with the siblings it imports,
+  // rather than running it in place.
+  for (const [name, source] of SCRIPTS) {
+    copyFileSync(source, join(root, "scripts", name));
+  }
 
   for (const [dir, packaged] of Object.entries(plugins)) {
     mkdirSync(join(root, "plugins", dir), { recursive: true });
@@ -78,27 +81,6 @@ afterEach(() => {
 });
 
 describe("scripts/plugins.mjs", () => {
-  it("recognizes direct execution through a canonical path alias", () => {
-    const lexical = join(tmpdir(), "alias", "plugins.mjs");
-    const canonical = join(tmpdir(), "canonical", "plugins.mjs");
-    const canonicalize = (candidate) =>
-      candidate === lexical || candidate === canonical ? canonical : candidate;
-
-    expect(isMainModule(lexical, pathToFileURL(canonical), canonicalize)).toBe(
-      true
-    );
-    expect(
-      isMainModule(
-        join(tmpdir(), "other", "plugins.mjs"),
-        pathToFileURL(canonical),
-        canonicalize
-      )
-    ).toBe(false);
-    expect(
-      isMainModule(undefined, pathToFileURL(canonical), canonicalize)
-    ).toBe(false);
-  });
-
   it("discovers every plugin directory in name order", () => {
     const root = writeRepository({
       radius: "radius",

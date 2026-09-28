@@ -33,9 +33,11 @@
 //   node scripts/plugins.mjs --env <plugin> [--version <v>] [--channel <c>]
 //                                               KEY=value lines for $GITHUB_ENV
 
-import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { isMainModule } from "./module-entry.mjs";
 
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -48,14 +50,6 @@ const CHANNELS = ["edge"];
 const PLUGIN_NAME = /^[a-z0-9][a-z0-9.-]*[a-z0-9]$|^[a-z0-9]$/;
 const SEMVER =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-
-// macOS exposes temporary files through /var while ESM resolves their module
-// URL through /private/var. Compare canonical paths so copied fixture scripts
-// still recognize direct execution.
-export function isMainModule(argvPath, moduleUrl, canonicalize = realpathSync) {
-  if (argvPath === undefined) return false;
-  return canonicalize(argvPath) === canonicalize(fileURLToPath(moduleUrl));
-}
 
 function fail(message) {
   console.error(`error: ${message}`);
