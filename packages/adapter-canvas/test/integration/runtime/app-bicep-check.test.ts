@@ -349,7 +349,7 @@ function sarif(results: unknown[]): string {
   return JSON.stringify({ runs: [{ results }] });
 }
 
-function compiledBicepFixture(name: string): string {
+function bicepFixture(name: string, file = "compiled.json"): string {
   return fs.readFileSync(
     path.join(
       root,
@@ -359,11 +359,24 @@ function compiledBicepFixture(name: string): string {
       "fixtures",
       "app-bicep-check",
       name,
-      "compiled.json"
+      file
     ),
     "utf8"
   );
 }
+
+test.each([
+  "aggregate-secret-alias",
+  "aggregate-secret-module",
+  "interpolated-ref",
+  "local-module-ref"
+])("keeps captured %s output on the documented Bicep version", (fixture) => {
+  const compiled = JSON.parse(bicepFixture(fixture)) as {
+    metadata?: { _generator?: { version?: string } };
+  };
+
+  assert.equal(compiled.metadata?._generator?.version, "0.42.1.51946");
+});
 
 const containerImageType = "Radius.Compute/containerImages@2025-08-01-preview";
 const fullSha = "a".repeat(40);
@@ -622,7 +635,7 @@ describe("managed Secret connection sources", () => {
     const directory = temporaryDirectory();
     const result = runChecker(
       directory,
-      fakeBicep(directory, sarif([]), 0, compiledBicepFixture(fixture))
+      fakeBicep(directory, sarif([]), 0, bicepFixture(fixture))
     );
 
     assert.equal(result.status, 1);
@@ -889,6 +902,262 @@ test("accepts a secretKeyRef helper regardless of its key", () => {
 
   assert.equal(result.status, 0);
   assert.equal(result.stderr, "");
+});
+
+describe("aggregate Recipe secret aliases", () => {
+  function managedSecret(key: string) {
+    return {
+      valueFrom: {
+        secretKeyRef: {
+          secretName: "[reference('cache').properties.secrets.name]",
+          key
+        }
+      }
+    };
+  }
+
+  test.each(["REDIS_ADDR", "REDIS_ADDRESS", "RedisHost", "redis-port"])(
+    "rejects aggregate Recipe output assigned to address-shaped %s",
+    (name) => {
+      const directory = temporaryDirectory();
+      const compiledOutput = template({
+        cache: radiusResource("Radius.Data/redisCaches@2025-08-01-preview", {}),
+        web: containerEnv({ [name]: managedSecret("url") })
+      });
+
+      const result = runChecker(
+        directory,
+        fakeBicep(directory, sarif([]), 0, compiledOutput)
+      );
+
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /aggregate-secret-alias/u);
+      assert.match(result.stderr, new RegExp(`env\\.${name}`, "u"));
+      assert.match(result.stderr, /Recipe-managed secret key "url"/u);
+      assert.match(result.stderr, /names an address part/u);
+      assert.match(result.stderr, /stop without publishing/u);
+    }
+  );
+
+  test.each(["url", "URI", "connectionString", "connection-string", "dsn"])(
+    "recognizes aggregate secret key %s",
+    (key) => {
+      const directory = temporaryDirectory();
+      const compiledOutput = template({
+        cache: radiusResource("Radius.Data/redisCaches@2025-08-01-preview", {}),
+        web: containerEnv({ REDIS_ADDR: managedSecret(key) })
+      });
+
+      const result = runChecker(
+        directory,
+        fakeBicep(directory, sarif([]), 0, compiledOutput)
+      );
+
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /aggregate-secret-alias/u);
+    }
+  );
+
+  test.each([
+    {
+      name: "a matching aggregate-shaped target",
+      env: { REDIS_URL: managedSecret("url") }
+    },
+    {
+      name: "a discrete managed secret",
+      env: { REDIS_ADDR: managedSecret("accessKey") }
+    },
+    {
+      name: "an authored Secret",
+      env: {
+        REDIS_ADDR: {
+          valueFrom: {
+            secretKeyRef: { secretName: "app-config", key: "url" }
+          }
+        }
+      }
+    },
+    {
+      name: "a plain environment value",
+      env: { REDIS_ADDR: { value: "redis:6379" } }
+    },
+    {
+      name: "an alias to an authored Secret",
+      env: {
+        APP_URL_HELPER: {
+          valueFrom: {
+            secretKeyRef: { secretName: "app-config", key: "url" }
+          }
+        },
+        REDIS_ADDR: { value: "$(APP_URL_HELPER)" }
+      }
+    },
+    {
+      name: "an aggregate-shaped alias target",
+      env: {
+        CACHE_URL_HELPER: managedSecret("url"),
+        REDIS_URL: { value: "$(CACHE_URL_HELPER)" }
+      }
+    },
+    {
+      name: "an unresolved plain parameter",
+      env: { REDIS_ADDR: { value: "[parameters('missing')]" } }
+    },
+    {
+      name: "a malformed environment entry",
+      env: { REDIS_ADDR: null }
+    }
+  ])("does not report $name", ({ env }) => {
+    const directory = temporaryDirectory();
+    const compiledOutput = template({
+      web: containerEnv(env)
+    });
+
+    const result = runChecker(
+      directory,
+      fakeBicep(directory, sarif([]), 0, compiledOutput)
+    );
+
+    assert.equal(result.status, 0);
+    assert.doesNotMatch(result.stderr, /aggregate-secret-alias/u);
+  });
+
+  test("rejects an aggregate Recipe secret passed through a helper", () => {
+    const directory = temporaryDirectory();
+    const compiledOutput = template({
+      web: containerEnv({
+        CACHE_URL_HELPER: managedSecret("url"),
+        REDIS_ADDR: { value: "$(CACHE_URL_HELPER)" }
+      })
+    });
+
+    const result = runChecker(
+      directory,
+      fakeBicep(directory, sarif([]), 0, compiledOutput)
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /aggregate-secret-alias/u);
+    assert.match(result.stderr, /through helper chain "CACHE_URL_HELPER"/u);
+    assert.match(result.stderr, /pass-through helper does not convert/u);
+  });
+
+  test("rejects an aggregate Recipe secret passed through multiple helpers", () => {
+    const directory = temporaryDirectory();
+    const compiledOutput = template({
+      web: containerEnv({
+        CACHE_URL_HELPER: managedSecret("url"),
+        INTERMEDIATE_URL: { value: "$(CACHE_URL_HELPER)" },
+        REDIS_ADDR: { value: "$(INTERMEDIATE_URL)" }
+      })
+    });
+
+    const result = runChecker(
+      directory,
+      fakeBicep(directory, sarif([]), 0, compiledOutput)
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /through helper chain "INTERMEDIATE_URL" -> "CACHE_URL_HELPER"/u
+    );
+    assert.match(result.stderr, /pass-through helper does not convert/u);
+  });
+
+  test("describes an aggregate embedded in a larger value conservatively", () => {
+    const directory = temporaryDirectory();
+    const compiledOutput = template({
+      web: containerEnv({
+        CACHE_URL_HELPER: managedSecret("url"),
+        REDIS_ADDR: { value: "$(CACHE_URL_HELPER),abortConnect=false" }
+      })
+    });
+
+    const result = runChecker(
+      directory,
+      fakeBicep(directory, sarif([]), 0, compiledOutput)
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /Embedding the aggregate in a larger value does not prove/u
+    );
+    assert.doesNotMatch(result.stderr, /pass-through helper/u);
+  });
+
+  test("checks aggregate secret names and keys passed into a local module", () => {
+    const directory = temporaryDirectory();
+    const compiledOutput = template({
+      service: localModuleResources(
+        {
+          web: containerEnv({
+            REDIS_ADDR: {
+              valueFrom: {
+                secretKeyRef: {
+                  secretName: "[parameters('cacheSecretName')]",
+                  key: "[parameters('outputName')]"
+                }
+              }
+            }
+          })
+        },
+        {
+          cacheSecretName: { type: "string" },
+          outputName: { type: "string" }
+        },
+        {
+          cacheSecretName: {
+            value: "[reference('cache').properties.secrets.name]"
+          },
+          outputName: { value: "url" }
+        }
+      )
+    });
+
+    const result = runChecker(
+      directory,
+      fakeBicep(directory, sarif([]), 0, compiledOutput)
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /service\.web\.properties/u);
+  });
+
+  test("rejects direct and helper aliases in captured Bicep output", () => {
+    const directory = temporaryDirectory();
+    const result = runChecker(
+      directory,
+      fakeBicep(directory, sarif([]), 0, bicepFixture("aggregate-secret-alias"))
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /env\.REDIS_HOST: Recipe-managed/u);
+    assert.match(
+      result.stderr,
+      /env\.REDIS_ADDR: Recipe-managed.*through helper chain "CACHE_URL_HELPER"/u
+    );
+  });
+
+  test("rejects a module-provided secret name and key in captured Bicep output", () => {
+    const directory = temporaryDirectory();
+    const result = runChecker(
+      directory,
+      fakeBicep(
+        directory,
+        sarif([]),
+        0,
+        bicepFixture("aggregate-secret-module")
+      )
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /child\.web\.properties.*Recipe-managed secret key "url"/u
+    );
+  });
 });
 
 test.each([
@@ -2372,7 +2641,7 @@ test("rejects an interpolated ref from captured Bicep output", () => {
   const directory = temporaryDirectory();
   const result = runChecker(
     directory,
-    fakeBicep(directory, sarif([]), 0, compiledBicepFixture("interpolated-ref"))
+    fakeBicep(directory, sarif([]), 0, bicepFixture("interpolated-ref"))
   );
 
   assert.equal(result.status, 1);
@@ -2384,7 +2653,7 @@ test("rejects a local module argument from captured Bicep output", () => {
   const directory = temporaryDirectory();
   const result = runChecker(
     directory,
-    fakeBicep(directory, sarif([]), 0, compiledBicepFixture("local-module-ref"))
+    fakeBicep(directory, sarif([]), 0, bicepFixture("local-module-ref"))
   );
 
   assert.equal(result.status, 1);
@@ -2395,17 +2664,17 @@ test("rejects a local module argument from captured Bicep output", () => {
   assert.match(result.stderr, /eb33f12/u);
 });
 
-// --- Repair budget ---------------------------------------------------------
-//
-// The checker bounds the authoring repair loop when the model it is compiling
-// sits in a staged modeling run. It re-implements the rules that
-// packages/core/src/modeling/app-staging.ts owns, because it ships inside the
-// installed plugin where the workspace packages do not exist, so these tests
-// also assert the two copies agree.
-
-// One SARIF diagnostic, at a given line, so a case can vary the rule, the text,
-// and the position independently.
-function diagnostic(ruleId: string, text: string, startLine: number) {
+// One SARIF diagnostic, at a given line, so a case can vary the rule, text,
+// and optional column fields independently.
+function diagnostic(
+  ruleId: string,
+  text: string,
+  startLine: number,
+  columns: {
+    startColumn?: number;
+    charOffset?: number;
+  } = {}
+) {
   return {
     level: "error",
     ruleId,
@@ -2413,13 +2682,191 @@ function diagnostic(ruleId: string, text: string, startLine: number) {
     locations: [
       {
         physicalLocation: {
-          artifactLocation: { uri: "file:///tmp/app.bicep" },
-          region: { startLine }
+          artifactLocation: { uri: "file:///fixture/app.bicep" },
+          region: {
+            startLine,
+            ...columns
+          }
         }
       }
     ]
   };
 }
+
+describe("diagnostic locations", () => {
+  const uri = "file:///fixture/app.bicep";
+  const text = "Invalid syntax.";
+  const message = `error BCP236: ${text}`;
+
+  it("preserves charOffset columns from captured Bicep SARIF output", () => {
+    const directory = temporaryDirectory();
+    const result = runChecker(
+      directory,
+      fakeBicep(
+        directory,
+        bicepFixture("diagnostic-columns", "diagnostics.sarif.json"),
+        1
+      )
+    );
+
+    assert.equal(result.status, 1);
+    assert.deepEqual(result.stderr.trimEnd().split("\n"), [
+      `${uri}:2:5: warning no-unused-vars: Variable "healthy" is declared but never used. [https://aka.ms/bicep/linter-diagnostics#no-unused-vars]`,
+      `${uri}:5:10: error BCP018: Expected the ":" character at this location. [https://aka.ms/bicep/core-diagnostics#BCP018]`,
+      `${uri}:5:16: error BCP009: Expected a literal value, an array, an object, a parenthesized expression, or a function call at this location. [https://aka.ms/bicep/core-diagnostics#BCP009]`,
+      `${uri}:7:24: error BCP062: The referenced declaration with name "objectValue" is not valid. [https://aka.ms/bicep/core-diagnostics#BCP062]`
+    ]);
+  });
+
+  it("prefers the standard startColumn when both column fields are present", () => {
+    const directory = temporaryDirectory();
+    const result = runChecker(
+      directory,
+      fakeBicep(
+        directory,
+        sarif([
+          diagnostic("BCP236", text, 7, {
+            startColumn: 17,
+            charOffset: 41
+          })
+        ]),
+        1
+      )
+    );
+
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr, `${uri}:7:17: ${message}\n`);
+  });
+
+  it.each([
+    {
+      name: "missing column",
+      locations: diagnostic("BCP236", text, 7).locations,
+      prefix: `${uri}:7: `
+    },
+    {
+      name: "zero column",
+      locations: diagnostic("BCP236", text, 7, { charOffset: 0 }).locations,
+      prefix: `${uri}:7: `
+    },
+    {
+      name: "unsafe column",
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri },
+            region: {
+              startLine: 7,
+              charOffset: Number.MAX_SAFE_INTEGER + 1
+            }
+          }
+        }
+      ],
+      prefix: `${uri}:7: `
+    },
+    {
+      name: "the absence of a column when an invalid standard column is not replaced by the Bicep field",
+      locations: diagnostic("BCP236", text, 7, {
+        startColumn: 0,
+        charOffset: 17
+      }).locations,
+      prefix: `${uri}:7: `
+    },
+    {
+      name: "position without URI",
+      locations: [
+        { physicalLocation: { region: { startLine: 7, charOffset: 17 } } }
+      ],
+      prefix: "line 7: "
+    },
+    {
+      name: "column without line",
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri },
+            region: { charOffset: 17 }
+          }
+        }
+      ],
+      prefix: `${uri}: `
+    },
+    {
+      name: "column on line zero",
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri },
+            region: { startLine: 0, charOffset: 17 }
+          }
+        }
+      ],
+      prefix: `${uri}: `
+    },
+    {
+      name: "secondary column",
+      locations: [
+        {
+          physicalLocation: {
+            artifactLocation: { uri },
+            region: { startLine: 7 }
+          }
+        },
+        {
+          physicalLocation: {
+            artifactLocation: { uri },
+            region: { startLine: 8, charOffset: 41 }
+          }
+        }
+      ],
+      prefix: `${uri}:7: `
+    },
+    {
+      name: "secondary location",
+      locations: [
+        {},
+        {
+          physicalLocation: {
+            artifactLocation: { uri },
+            region: { startLine: 8, charOffset: 41 }
+          }
+        }
+      ],
+      prefix: ""
+    }
+  ])(
+    "preserves $name without inventing a location",
+    ({ locations, prefix }) => {
+      const directory = temporaryDirectory();
+      const result = runChecker(
+        directory,
+        fakeBicep(
+          directory,
+          sarif([
+            {
+              level: "error",
+              ruleId: "BCP236",
+              message: { text },
+              locations
+            }
+          ]),
+          1
+        )
+      );
+
+      assert.equal(result.status, 1);
+      assert.equal(result.stderr, `${prefix}${message}\n`);
+    }
+  );
+});
+
+// --- Repair budget ---------------------------------------------------------
+//
+// The checker bounds the authoring repair loop when the model it is compiling
+// sits in a staged modeling run. It re-implements the rules that
+// packages/core/src/modeling/app-staging.ts owns, because it ships inside the
+// installed plugin where the workspace packages do not exist, so these tests
+// also assert the two copies agree.
 
 // Compiler output holding a single Bicep diagnostic.
 function bcp(code: number, text: string, startLine: number): string {
@@ -2629,6 +3076,39 @@ describe("repair budget", () => {
     assert.match(repeated.stderr, /materially different fix/u);
     assert.deepEqual(readRepair(directory), {
       attempts: 3,
+      fingerprint: fingerprintCompilerOutput(first.stderr)
+    });
+  });
+
+  it("preserves repeated-failure detection when a column disappears", () => {
+    const directory = temporaryDirectory();
+    stagedRun(directory);
+    const first = runChecker(
+      directory,
+      fakeBicep(
+        directory,
+        sarif([
+          diagnostic("BCP236", "Invalid syntax.", 7, {
+            charOffset: 17
+          })
+        ]),
+        1
+      )
+    );
+    const second = runChecker(
+      directory,
+      fakeBicep(
+        directory,
+        sarif([diagnostic("BCP236", "Invalid syntax.", 7)]),
+        1
+      )
+    );
+
+    assert.equal(first.status, 1);
+    assert.equal(second.status, 1);
+    assert.ok(second.stderr.includes(REPEATED_FAILURE_MESSAGE));
+    assert.deepEqual(readRepair(directory), {
+      attempts: 2,
       fingerprint: fingerprintCompilerOutput(first.stderr)
     });
   });
@@ -3102,6 +3582,12 @@ describe("agreement with the core repair rules", () => {
       repeated: true
     },
     {
+      name: "the same failure at a shifted column",
+      first: sarif([diagnostic("BCP057", "missing", 12, { charOffset: 17 })]),
+      second: sarif([diagnostic("BCP057", "missing", 12, { charOffset: 41 })]),
+      repeated: true
+    },
+    {
       name: "the same failures in a different order",
       first: sarif([
         diagnostic("BCP057", "first problem", 1),
@@ -3125,12 +3611,13 @@ describe("agreement with the core repair rules", () => {
 
     runChecker(directory, fakeBicep(directory, first, 1));
     const afterFirst = parseRepairState(readRepair(directory));
-    runChecker(directory, fakeBicep(directory, second, 1));
+    const result = runChecker(directory, fakeBicep(directory, second, 1));
     const afterSecond = parseRepairState(readRepair(directory));
 
     // The script recorded both fingerprints; core decides whether they mean
     // the same failure. Agreement is that verdict matching what the script
     // told the agent.
+    assert.equal(result.stderr.includes(REPEATED_FAILURE_MESSAGE), repeated);
     assert.equal(
       isRepeatedFailure(afterFirst, afterSecond.fingerprint),
       repeated

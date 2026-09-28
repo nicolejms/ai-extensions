@@ -15,9 +15,11 @@ import {
   radiusIsManagedClusterResource,
   radiusIsManagedClusterType,
   radiusNormalizeIcon,
-  radiusResolveIcon,
   radiusNormalizeIconSource,
+  radiusResolveIcon,
   radiusResolveIconSource,
+  radiusResolvedConcreteType,
+  radiusResolvedDisplayLabel,
   radiusResolvedOutputRank,
   radiusSelectResolvedResource,
   srcLineFromRef,
@@ -303,12 +305,13 @@ describe("radiusNormalizeIcon", () => {
 });
 
 describe("radiusNormalizeIconSource", () => {
-  it("marks raw svg markup that paints in currentColor as monochrome", () => {
+  it("recognizes the Radius v0.61 mask and currentColor icon format", () => {
     const out = radiusNormalizeIconSource(
-      '<svg viewBox="0 0 8 8"><rect fill="currentColor" /></svg>'
+      '<svg viewBox="0 0 8 8" fill="none"><mask id="resource-icon"><path d="M1 1h6v6H1z" fill="white"/></mask><rect width="8" height="8" fill="currentColor" mask="url(#resource-icon)"/></svg>'
     );
     expect(out.monochrome).toBe(true);
     expect(decodeURIComponent(out.src)).toContain('fill="currentColor"');
+    expect(decodeURIComponent(out.src)).toContain('mask="url(#resource-icon)"');
   });
 
   it("recognizes currentColor paint attributes case-insensitively", () => {
@@ -441,6 +444,68 @@ describe("radiusFormatResolvedTypeLabel", () => {
   });
 });
 
+describe("radiusResolvedDisplayLabel", () => {
+  it("prefers and trims a friendly display type", () => {
+    expect(
+      radiusResolvedDisplayLabel({
+        type: "Microsoft.ContainerService/managedClusters@2024-01-01",
+        displayType: "  Azure Kubernetes Service  "
+      })
+    ).toBe("Azure Kubernetes Service");
+  });
+
+  describe("radiusResolvedConcreteType", () => {
+    it.each([
+      [undefined, ""],
+      [{}, ""],
+      [{ type: "   " }, ""],
+      [{ type: 42 }, ""],
+      [
+        { type: " Microsoft.DBforMySQL/flexibleServers@2025-01-01 " },
+        "Microsoft.DBforMySQL/flexibleServers@2025-01-01"
+      ]
+    ])("normalizes %j to %j", (output, expected) => {
+      expect(
+        radiusResolvedConcreteType(output as ResourceOutput | undefined)
+      ).toBe(expected);
+    });
+  });
+
+  it.each([undefined, "", "   "])(
+    "falls back to the normalized concrete type for display type %j",
+    (displayType) => {
+      expect(
+        radiusResolvedDisplayLabel({
+          type: "Microsoft.DBforPostgreSQL/flexibleServers@2024-01-01",
+          displayType
+        })
+      ).toBe("Microsoft.DBforPostgreSQL/flexibleServers");
+    }
+  );
+
+  it("returns empty when neither label source exists", () => {
+    expect(radiusResolvedDisplayLabel(undefined)).toBe("");
+    expect(radiusResolvedDisplayLabel({})).toBe("");
+  });
+
+  it("falls back safely when serialized displayType is not a string", () => {
+    const output = parseGraphResources([
+      {
+        outputResources: [
+          {
+            type: "Microsoft.Storage/storageAccounts@2024-01-01",
+            displayType: 42
+          }
+        ]
+      }
+    ])[0].outputResources?.[0];
+
+    expect(radiusResolvedDisplayLabel(output)).toBe(
+      "Microsoft.Storage/storageAccounts"
+    );
+  });
+});
+
 describe("radiusResolvedOutputRank", () => {
   it("ranks nested child resources lowest", () => {
     expect(
@@ -453,6 +518,9 @@ describe("radiusResolvedOutputRank", () => {
   it("ranks known supporting kinds below the primary", () => {
     expect(radiusResolvedOutputRank({ type: "core/Secret" })).toBe(1);
     expect(radiusResolvedOutputRank({ displayType: "core/Service" })).toBe(1);
+    expect(
+      radiusResolvedOutputRank({ type: "   ", displayType: "core/Secret" })
+    ).toBe(1);
   });
 
   it("ranks everything else as a primary candidate", () => {
@@ -465,8 +533,47 @@ describe("radiusSelectResolvedResource", () => {
     expect(radiusSelectResolvedResource(null)).toBeNull();
     expect(radiusSelectResolvedResource({})).toBeNull();
     expect(
-      radiusSelectResolvedResource({ outputResources: [{ name: "untyped" }] })
+      radiusSelectResolvedResource({
+        outputResources: [
+          null,
+          { name: "untyped" },
+          { displayType: "" },
+          { displayType: "   " },
+          { type: "   " }
+        ]
+      })
     ).toBeNull();
+  });
+
+  it("ignores malformed display types before selecting a valid output", () => {
+    const outputs = parseGraphResources([
+      {
+        outputResources: [
+          { displayType: 42 },
+          {
+            type: "Microsoft.Storage/storageAccounts",
+            displayType: "Azure Storage Account"
+          }
+        ]
+      }
+    ])[0].outputResources;
+
+    expect(radiusSelectResolvedResource({ outputResources: outputs })).toEqual({
+      type: "Microsoft.Storage/storageAccounts",
+      displayType: "Azure Storage Account"
+    });
+  });
+
+  it("does not let a blank type make a supporting display type primary", () => {
+    const primary = {
+      type: "apps/Deployment",
+      displayType: "Deployment (K8s)"
+    };
+    expect(
+      radiusSelectResolvedResource({
+        outputResources: [{ type: "   ", displayType: "core/Secret" }, primary]
+      })
+    ).toBe(primary);
   });
 
   it("prefers the highest-ranked output and keeps declaration order on ties", () => {
