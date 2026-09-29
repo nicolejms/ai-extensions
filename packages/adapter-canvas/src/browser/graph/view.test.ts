@@ -540,6 +540,7 @@ describe("flow application", () => {
 
   it("configures React Flow the way the shipped graph does", () => {
     const { tree, vendor } = renderApp();
+    expect(vendor.react.layoutEffects).toHaveLength(1);
     const root = tree as RenderedElement;
     expect(root.type).toBe(vendor.reactFlow.default);
     expect(root.props.nodeTypes).toEqual({ rad: "RadNode" });
@@ -584,7 +585,7 @@ describe("flow application", () => {
     }
   });
 
-  it("fits the viewport shortly after mounting", () => {
+  it("lets React Flow fit the viewport on mount without a deferred refit", () => {
     const { tree, clock } = renderApp();
     const instance = createFakeFlowInstance();
     callHandler(tree as RenderedElement, "onInit", {});
@@ -594,7 +595,8 @@ describe("flow application", () => {
     onInit(instance);
     expect(instance.fits).toEqual([]);
     clock.tick(30);
-    expect(instance.fits).toEqual([{ padding: 0.18 }]);
+    expect(instance.fits).toEqual([]);
+    expect(clock.timeouts).toBe(0);
   });
 
   it("pushes a status-only update into React state without changing the viewport", () => {
@@ -615,7 +617,7 @@ describe("flow application", () => {
     // the assertion below would still pass if a re-fit timer were
     // reintroduced, because the fake clock would never flush it.
     expect(clock.timeouts).toBe(0);
-    expect(instance.fits).toEqual([{ padding: 0.18 }]);
+    expect(instance.fits).toEqual([]);
   });
 
   it("re-fits when the update changes which nodes exist", () => {
@@ -626,7 +628,7 @@ describe("flow application", () => {
     );
     vendor.react.runEffects();
     clock.tick(30);
-    expect(instance.fits).toEqual([{ padding: 0.18 }]);
+    expect(instance.fits).toEqual([]);
 
     // Switching application or environment reuses the controller, so an
     // entirely different resource set arrives through the same update path.
@@ -637,7 +639,7 @@ describe("flow application", () => {
     updater.fn?.(next.nodes, next.edges);
     expect(vendor.reactFlow.nodeUpdates).toHaveLength(1);
     clock.tick(40);
-    expect(instance.fits).toEqual([{ padding: 0.18 }, { padding: 0.18 }]);
+    expect(instance.fits).toEqual([{ padding: 0.18 }]);
   });
 
   it("re-fits only once when a changed node set is then restated", () => {
@@ -652,14 +654,14 @@ describe("flow application", () => {
     const next = buildGraph(resolveGraphSettings(), [{ id: "c", name: "c" }]);
     updater.fn?.(next.nodes, next.edges);
     clock.tick(40);
-    expect(instance.fits).toHaveLength(2);
+    expect(instance.fits).toHaveLength(1);
 
     // Polling continues against the newly selected graph. Those refreshes are
     // status-only again, so they must not keep stealing the viewport.
     updater.fn?.(next.nodes, next.edges);
     expect(clock.timeouts).toBe(0);
     clock.tick(40);
-    expect(instance.fits).toHaveLength(2);
+    expect(instance.fits).toHaveLength(1);
     expect(vendor.reactFlow.nodeUpdates).toHaveLength(2);
   });
 
@@ -674,7 +676,7 @@ describe("flow application", () => {
 
     updater.fn?.([...built.nodes].reverse(), built.edges);
     expect(clock.timeouts).toBe(0);
-    expect(instance.fits).toEqual([{ padding: 0.18 }]);
+    expect(instance.fits).toEqual([]);
     expect(vendor.reactFlow.nodeUpdates).toHaveLength(1);
   });
 

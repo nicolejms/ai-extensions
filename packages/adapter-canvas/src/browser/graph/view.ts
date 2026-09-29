@@ -341,10 +341,9 @@ interface AppProps {
 }
 
 const FIT_VIEW_OPTIONS = { padding: 0.18 };
-const FIT_AFTER_MOUNT_MS = 30;
 // A changed node set is re-laid out before it is pushed into React state, so
-// the fit that frames it waits for that render to paint, exactly as the mount
-// fit waits for the initial one.
+// the fit that frames it waits for that render to paint. React Flow handles
+// the initial fit itself; an extra delayed fit would undo early user zoom.
 const FIT_AFTER_RESHAPE_MS = 40;
 
 // Which nodes the view is showing, independent of their layout order. Dagre may
@@ -391,7 +390,7 @@ export function createGraphApp(
     const instanceRef = react.useRef<ReactFlowInstance | null>(null);
     const signatureRef = react.useRef(nodeSignature(props.initialNodes));
 
-    react.useEffect(() => {
+    react.useLayoutEffect(() => {
       updater.fn = (nextNodes, nextEdges) => {
         setNodes(nextNodes);
         setEdges(nextEdges);
@@ -434,10 +433,6 @@ export function createGraphApp(
         proOptions: { hideAttribution: true },
         onInit: (instance: ReactFlowInstance) => {
           instanceRef.current = instance;
-          clock.setTimeout(
-            () => fitView(instance, FIT_VIEW_OPTIONS),
-            FIT_AFTER_MOUNT_MS
-          );
         }
       },
       h(flow.Background, { gap: 16, size: 1 }),

@@ -65,7 +65,10 @@ describe("pageShell", () => {
     );
     expect(html).not.toContain("localStorage");
     expect(markupWithoutBrowserBundles(html)).not.toContain("matchMedia");
-    expect(html).not.toContain("prefers-color-scheme");
+    // React Flow's vendored stylesheet has a media-query fallback of its own.
+    expect(
+      markupWithoutBrowserBundles(html).replace(browserStyle("graph"), "")
+    ).not.toContain("prefers-color-scheme");
     expect(html).not.toContain(
       "--rad-bg-subtle: var(--background-color-segmented"
     );

@@ -15,12 +15,13 @@
 // Test-support only: production modules never import this.
 
 import { Component, createElement, isValidElement } from "react";
-import ReactFlowComponent, {
+import {
   Background,
   Controls,
   Handle,
-  Position
-} from "reactflow";
+  Position,
+  ReactFlow as ReactFlowComponent
+} from "@xyflow/react";
 import dagre from "dagre";
 import type { ReactElement } from "react";
 import type {

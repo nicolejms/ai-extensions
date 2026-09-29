@@ -562,6 +562,9 @@ describe("graph view in a real browser", () => {
 
     const fittedTransform = await waitForStableTransform(viewport);
     await userEvent.click(zoomOut);
+    await waitFor(() =>
+      expect(viewport.style.transform).not.toBe(fittedTransform)
+    );
     const zoomedTransform = await waitForStableTransform(viewport);
     // Guard against a vacuous assertion: the control must really move the
     // viewport, otherwise "unchanged after refresh" would prove nothing.
@@ -599,6 +602,9 @@ describe("graph view in a real browser", () => {
 
     const fittedTransform = await waitForStableTransform(viewport);
     await userEvent.click(zoomOut);
+    await waitFor(() =>
+      expect(viewport.style.transform).not.toBe(fittedTransform)
+    );
     const zoomedTransform = await waitForStableTransform(viewport);
     expect(zoomedTransform).not.toBe(fittedTransform);
 
@@ -617,6 +623,9 @@ describe("graph view in a real browser", () => {
     expect(graph.update(next.nodes, next.edges)).toBe(true);
 
     await card("api");
+    await waitFor(() =>
+      expect(viewport.style.transform).not.toBe(zoomedTransform)
+    );
     expect(await waitForStableTransform(viewport)).not.toBe(zoomedTransform);
   });
 

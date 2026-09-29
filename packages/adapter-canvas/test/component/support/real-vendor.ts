@@ -9,9 +9,9 @@
 
 import * as React from "react";
 import * as ReactDOM from "react-dom/client";
-import * as ReactFlow from "reactflow";
+import * as ReactFlow from "@xyflow/react";
 import dagre from "dagre";
-import "reactflow/dist/style.css";
+import "@xyflow/react/dist/style.css";
 import type { GraphVendor } from "../../../src/browser/graph/vendor.js";
 import type { ClockPort } from "../../../src/browser/ports.js";
 
@@ -19,7 +19,10 @@ export function realGraphVendor(): GraphVendor {
   return {
     react: React as unknown as GraphVendor["react"],
     reactDom: ReactDOM as unknown as GraphVendor["reactDom"],
-    reactFlow: ReactFlow as unknown as GraphVendor["reactFlow"],
+    reactFlow: {
+      ...ReactFlow,
+      default: ReactFlow.ReactFlow
+    } as unknown as GraphVendor["reactFlow"],
     dagre: dagre as unknown as GraphVendor["dagre"]
   };
 }
