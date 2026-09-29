@@ -566,9 +566,13 @@ describe("flow application", () => {
       )
     ).toBe(false);
     expect(findAllByType(tree, vendor.reactFlow.Background)).toHaveLength(1);
-    expect(props(findAllByType(tree, vendor.reactFlow.Background)[0]).gap).toBe(
-      16
+    const background = props(
+      findAllByType(tree, vendor.reactFlow.Background)[0]
     );
+    expect(background.gap).toBe(16);
+    expect(background.size).toBe(1);
+    // v12 adds half the gap to the offset; -7.5 lands the dot where v11 put it.
+    expect(background.offset).toBe(-7.5);
     expect(
       props(findAllByType(tree, vendor.reactFlow.Controls)[0]).showInteractive
     ).toBe(false);
@@ -689,15 +693,36 @@ describe("flow application", () => {
     expect(clock.timeouts).toBe(0);
   });
 
-  it("survives a viewport that refuses to fit", () => {
-    const { tree, clock } = renderApp();
-    const instance = createFakeFlowInstance();
-    instance.failing = true;
-    (props(tree as RenderedElement).onInit as (value: unknown) => void)(
-      instance
-    );
-    expect(() => clock.tick(30)).not.toThrow();
-  });
+  it.each(["throw", "reject"] as const)(
+    "survives a viewport that refuses to fit by %s",
+    async (failure) => {
+      const { tree, clock, vendor, updater } = renderApp();
+      const instance = createFakeFlowInstance();
+      instance.failure = failure;
+      (props(tree as RenderedElement).onInit as (value: unknown) => void)(
+        instance
+      );
+      vendor.react.runEffects();
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown): void => {
+        unhandled.push(reason);
+      };
+      process.on("unhandledRejection", onUnhandled);
+      try {
+        const next = buildGraph(resolveGraphSettings(), [
+          { id: "c", name: "c" }
+        ]);
+        updater.fn?.(next.nodes, next.edges);
+        expect(() => clock.tick(40)).not.toThrow();
+        // Let a rejected fit settle so an unobserved rejection would surface.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(unhandled).toEqual([]);
+        expect(vendor.reactFlow.nodeUpdates).toHaveLength(1);
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+      }
+    }
+  );
 
   it("unbinds the updater when the application is torn down", () => {
     const { vendor, updater } = renderApp();

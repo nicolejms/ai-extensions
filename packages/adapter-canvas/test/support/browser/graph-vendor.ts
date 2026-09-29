@@ -355,19 +355,24 @@ export function createRecordingGraphVendor(): RecordingGraphVendorHarness {
 
 // A real instance only exists once React Flow has mounted in a browser, so the
 // viewport port stays recorded here and is exercised for real in Chromium.
+// `failure` selects how a refused fit surfaces: a synchronous throw, or the
+// rejected promise React Flow v12 can return.
 export interface FakeFlowInstance extends ReactFlowInstance {
   readonly fits: ReadonlyArray<Record<string, unknown>>;
-  failing: boolean;
+  failure: "none" | "throw" | "reject";
 }
 
 export function createFakeFlowInstance(): FakeFlowInstance {
   const fits: Array<Record<string, unknown>> = [];
   const instance: FakeFlowInstance = {
     fits,
-    failing: false,
+    failure: "none",
     fitView(options) {
-      if (instance.failing) throw new Error("viewport not ready");
+      if (instance.failure === "throw") throw new Error("viewport not ready");
       fits.push(options);
+      return instance.failure === "reject" ?
+          Promise.reject(new Error("viewport not ready"))
+        : Promise.resolve(true);
     }
   };
   return instance;

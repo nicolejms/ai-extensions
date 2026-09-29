@@ -346,6 +346,13 @@ const FIT_VIEW_OPTIONS = { padding: 0.18 };
 // the initial fit itself; an extra delayed fit would undo early user zoom.
 const FIT_AFTER_RESHAPE_MS = 40;
 
+// React Flow v12 anchors each dot half a gap from the pattern origin; v11
+// anchored it half a dot. This offset restores the v11 grid position so the
+// canvas keeps its established look.
+const GRID_GAP = 16;
+const GRID_DOT_SIZE = 1;
+const GRID_DOT_OFFSET = (GRID_DOT_SIZE - GRID_GAP) / 2;
+
 // Which nodes the view is showing, independent of their layout order. Dagre may
 // hand back the same resources in a different sequence for an unrelated reason,
 // and that alone must not count as a new graph.
@@ -353,16 +360,19 @@ function nodeSignature(nodes: readonly GraphNode[]): string {
   return [...nodes.map((node) => node.id)].sort().join("\u0000");
 }
 
+// Fitting is presentation only: a viewport that refuses to fit, whether it
+// throws or rejects its promise, must not take the graph down with it.
 function fitView(
   instance: ReactFlowInstance,
   options: Record<string, unknown>
 ): void {
+  let settled: Promise<boolean>;
   try {
-    instance.fitView(options);
+    settled = instance.fitView(options);
   } catch {
-    // Fitting is presentation only: a viewport that refuses to fit must not
-    // take the graph down with it.
+    return;
   }
+  settled.catch(() => undefined);
 }
 
 // The mounted flow application. It binds the updater so the controller can push
@@ -435,7 +445,11 @@ export function createGraphApp(
           instanceRef.current = instance;
         }
       },
-      h(flow.Background, { gap: 16, size: 1 }),
+      h(flow.Background, {
+        gap: GRID_GAP,
+        size: GRID_DOT_SIZE,
+        offset: GRID_DOT_OFFSET
+      }),
       h(flow.Controls, { showInteractive: false })
     );
   };

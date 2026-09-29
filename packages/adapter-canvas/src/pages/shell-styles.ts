@@ -525,13 +525,27 @@ export const SHELL_STYLE_CSS = `  /* ─── Radius design tokens (from Figma 
     width: 1px; height: 1px; min-width: 0; min-height: 0;
     background: transparent; border: none; opacity: 0; pointer-events: none;
   }
+  /* React Flow v12 centres handles on the card border; v11 set them 4px
+     outside it, which leaves the gap between an edge and its cards. */
+  .react-flow__handle.rad-handle.react-flow__handle-top {
+    top: -4px; transform: translate(-50%, 0);
+  }
+  .react-flow__handle.rad-handle.react-flow__handle-bottom {
+    bottom: -4px; transform: translate(-50%, 0);
+  }
   .react-flow__attribution { background: transparent; font-size: 10px; }
   .react-flow__attribution a { color: var(--rad-text-tertiary); }
   .react-flow__controls { box-shadow: 0 1px 4px var(--rad-shadow); border-radius: 6px; overflow: hidden; }
+  /* React Flow v11 sized control buttons as content-box with 5px padding, and
+     v12 no longer sets box-sizing, so the global border-box rule would shrink
+     them. Pin the v11 box so the controls keep their established size. */
   .react-flow__controls-button {
     background: var(--rad-surface); border-bottom: 1px solid var(--rad-stroke);
     color: var(--rad-text); width: 26px; height: 26px;
+    box-sizing: content-box; padding: 5px;
   }
+  /* v12 also drops the last button's border, which v11 kept. */
+  .react-flow__controls-button:last-child { border-bottom: 1px solid var(--rad-stroke); }
   .react-flow__controls-button:hover { background: var(--rad-bg-subtle); }
   .react-flow__controls-button svg { fill: currentColor; }
   .react-flow__minimap { background: var(--rad-surface); border: 1px solid var(--rad-stroke); border-radius: 6px; }
@@ -540,6 +554,9 @@ export const SHELL_STYLE_CSS = `  /* ─── Radius design tokens (from Figma 
      the Background "color" prop is discarded and the dots fall back to black.
      Theme it as a CSS property instead, which does resolve var(). */
   .react-flow__background circle { fill: var(--rad-grid); }
+  /* React Flow v12 paints dots through its own two-class rule, which outranks
+     the selector above; feed it the Radius token through its variable. */
+  .react-flow { --xy-background-pattern-color: var(--rad-grid); }
   .react-flow__background path { stroke: var(--rad-grid); }
   /* Delete confirmation dialog (Figma type-to-confirm flow). Global because
      every surface that can delete a deployment shares this one dialog. */
