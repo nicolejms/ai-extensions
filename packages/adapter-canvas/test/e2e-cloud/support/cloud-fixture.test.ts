@@ -3090,16 +3090,78 @@ describe("createCloudFixture", () => {
         `Radius application demo in ${ENVIRONMENT}`,
         "Kubernetes workloads for demo in default-demo"
       ]);
-      expect(fake.commands.commandLines("kubectl")).toEqual([
+      expect(fake.commands.commandLines("kubectl")).toContain(
         `--kubeconfig ${WORKSPACE}/kubeconfig delete all --namespace default-demo ` +
           "--selector radapp.io/application=demo --ignore-not-found=true --wait=true"
-      ]);
+      );
       const calls = fake.commands.calls.map(
         ({ tool, args }) => `${tool} ${args.join(" ")}`
       );
       expect(
         calls.findIndex((line) => line.startsWith("gh run view "))
       ).toBeLessThan(calls.findIndex((line) => line.startsWith("kubectl ")));
+    });
+
+    it("continues normal teardown after a verified application deletion leaked workloads", async () => {
+      const { fixture, fake } = await createHarness(
+        [
+          {
+            tool: "az",
+            match: ["aks", "get-credentials"],
+            respond: {}
+          },
+          {
+            tool: "kubectl",
+            match: ["get", RADIUS_RENDERED_RESOURCES],
+            respond: {
+              stdout: JSON.stringify({
+                items: [
+                  {
+                    kind: "HorizontalPodAutoscaler",
+                    metadata: { name: "sleeper" }
+                  }
+                ]
+              })
+            }
+          },
+          {
+            tool: "kubectl",
+            match: ["delete", "all"],
+            respond: {}
+          }
+        ],
+        {},
+        { assertionTimeoutMs: 2000, assertionPollIntervalMs: 1000 }
+      );
+      fixture.recordApplicationDeletionSucceeded("demo", "default-demo");
+
+      await expect(
+        fixture.assertApplicationWorkloadsAbsent("demo", "default-demo")
+      ).rejects.toThrow(
+        /1 workload resource\(s\) remain: "HorizontalPodAutoscaler\/sleeper"/
+      );
+      await expect(fixture.reclaimLeakedProductArtifacts()).resolves.toEqual([
+        "Kubernetes workloads for demo in default-demo"
+      ]);
+
+      const gh = fake.commands.commandLines("gh");
+      expect(
+        gh.some((line) =>
+          line.startsWith("workflow run delete-application.yml")
+        )
+      ).toBe(false);
+      expect(gh).toContain(`api ${ENVIRONMENT_PATH}`);
+      expect(gh).toContain(`api ${MATCHING_REFS_PATH}`);
+      expect(fake.commands.commandLines("gh-package")).toContain(
+        `api ${PACKAGE_PATH}`
+      );
+      expect(fake.commands.commandLines("az")).toContain(
+        `ad sp list --filter ${EXACT_NAME_FILTER} --query [].{id:id,appId:appId} -o json`
+      );
+      expect(fake.commands.commandLines("kubectl")).toContain(
+        `--kubeconfig ${WORKSPACE}/kubeconfig delete all --namespace default-demo ` +
+          "--selector radapp.io/application=demo --ignore-not-found=true --wait=true"
+      );
     });
 
     it("treats an already-missing application namespace as reclaimed", async () => {

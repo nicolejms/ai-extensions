@@ -162,6 +162,11 @@ export interface CloudFixture {
     application: string,
     namespace: string
   ): void;
+  /** Records that the journey verified Radius removed the application. */
+  recordApplicationDeletionSucceeded(
+    application: string,
+    namespace: string
+  ): void;
   /**
    * Best-effort removal of product-created state left behind by this run.
    *
@@ -713,7 +718,7 @@ export async function createCloudFixture(
   const observedCredentialApps = new Map<string, AppRegistrationRecord>();
   const applicationCleanupTargets = new Map<
     string,
-    { application: string; namespace: string }
+    { application: string; namespace: string; deletionVerified: boolean }
   >();
   const APP_REGISTRATION_KEY = "app-registration";
   const GITHUB_ENVIRONMENT_KEY = "github-environment";
@@ -1108,9 +1113,23 @@ export async function createCloudFixture(
         `${requiredNamespace}\n${requiredApplication}`,
         {
           application: requiredApplication,
-          namespace: requiredNamespace
+          namespace: requiredNamespace,
+          deletionVerified:
+            applicationCleanupTargets.get(
+              `${requiredNamespace}\n${requiredApplication}`
+            )?.deletionVerified ?? false
         }
       );
+    },
+
+    recordApplicationDeletionSucceeded(application, namespace) {
+      fixture.registerApplicationCleanupTarget(application, namespace);
+      const target = applicationCleanupTargets.get(
+        `${namespace}\n${application}`
+      );
+      if (!target)
+        throw new Error("The application cleanup target was not registered.");
+      target.deletionVerified = true;
     },
 
     async readApplicationWorkloads(application, namespace) {
@@ -1192,11 +1211,13 @@ export async function createCloudFixture(
       };
 
       const applicationFailureStart = failures.length;
-      for (const target of applicationCleanupTargets.values())
+      for (const target of applicationCleanupTargets.values()) {
+        if (target.deletionVerified) continue;
         await attempt(
           `Radius application ${target.application} in ${environmentName}`,
           () => deleteApplicationResources(target.application)
         );
+      }
       const applicationDeletionFailed =
         failures.length > applicationFailureStart;
 

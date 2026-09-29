@@ -991,6 +991,10 @@ test.describe("Radius Canvas manages an environment's lifecycle against real clo
         throw deletionPresence.explain(error);
       }
 
+      cloud.recordApplicationDeletionSucceeded(
+        deployedApplication,
+        deployedNamespace
+      );
       await cloud.assertApplicationWorkloadsAbsent(
         deployedApplication,
         deployedNamespace
