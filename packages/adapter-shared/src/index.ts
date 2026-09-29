@@ -15,6 +15,7 @@ export {
   MANAGED_RAD_PATH,
   resolveExistingRadBinary,
   ensureRadBinary,
+  radBinaryVersion,
   managedBicepEnv,
   spawnRad,
   killChildTree,

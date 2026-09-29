@@ -27,14 +27,6 @@ const actionFile = join(
   ".github/extension/actions/delete-resource/action.yml"
 );
 const scratchRoot = mkdtempSync(join(tmpdir(), "delete-resource-test-"));
-const artifactPath = spawnSync(
-  "bash",
-  [
-    "-lc",
-    "if command -v cygpath >/dev/null 2>&1; then cygpath -w /tmp/radius-output/rad-delete-result.json; else printf '%s' /tmp/radius-output/rad-delete-result.json; fi"
-  ],
-  { encoding: "utf8" }
-).stdout.trim();
 const failures = [];
 
 function fail(message) {
@@ -72,6 +64,25 @@ function executable(path, contents) {
   chmodSync(path, 0o755);
 }
 
+function shellQuote(value) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function bashPath(path) {
+  const converted = spawnSync(
+    "bash",
+    [
+      "-lc",
+      `if command -v cygpath >/dev/null 2>&1; then cygpath -u ${shellQuote(path)}; else printf '%s' ${shellQuote(path)}; fi`
+    ],
+    { encoding: "utf8" }
+  );
+  if (converted.status !== 0) {
+    throw new Error(`Could not convert test path for bash: ${converted.stderr}`);
+  }
+  return converted.stdout.trim();
+}
+
 function runCase(
   name,
   {
@@ -89,6 +100,9 @@ function runCase(
   const bin = join(caseRoot, "bin");
   mkdirSync(bin, { recursive: true });
   const calls = join(caseRoot, "calls.log");
+  const resultFile = join(caseRoot, "rad-delete-result.json");
+  const bashCaseRoot = bashPath(caseRoot);
+  const bashResultFile = `${bashCaseRoot}/rad-delete-result.json`;
 
   executable(
     join(bin, "rad"),
@@ -144,7 +158,19 @@ process.stdout.write(JSON.stringify({
   );
 
   const script = join(caseRoot, "run.sh");
-  writeFileSync(script, extractRunBlock(), "utf8");
+  const runBlock = extractRunBlock()
+    .replace(
+      /^RESULT_FILE=.*$/mu,
+      `RESULT_FILE=${shellQuote(bashResultFile)}`
+    )
+    .replace(
+      /^mkdir -p \/tmp\/radius-output$/mu,
+      `mkdir -p ${shellQuote(bashCaseRoot)}`
+    );
+  if (runBlock.includes("/tmp/radius-output")) {
+    throw new Error("Extracted action still writes to shared /tmp/radius-output");
+  }
+  writeFileSync(script, runBlock, "utf8");
   const result = spawnSync("bash", [script], {
     encoding: "utf8",
     env: {
@@ -164,9 +190,7 @@ process.stdout.write(JSON.stringify({
     }
   });
   const callText = existsSync(calls) ? readFileSync(calls, "utf8") : "";
-  const artifact = JSON.parse(
-    readFileSync(artifactPath, "utf8")
-  );
+  const artifact = JSON.parse(readFileSync(resultFile, "utf8"));
   return { result, calls: callText, artifact };
 }
 

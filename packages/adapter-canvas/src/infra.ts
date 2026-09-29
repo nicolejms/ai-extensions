@@ -23,6 +23,10 @@ import {
   DELETE_AZURE_FILE,
   DELETE_AWS_FILE
 } from "@radius-project/core";
+import {
+  ensureRadBinary,
+  radBinaryVersion
+} from "@radius-project/adapter-shared";
 import { VERIFY_OPERATION_INPUT } from "./verification-run-identity.js";
 import type { DeployWorkflowOptions } from "@radius-project/core";
 import { parse as parseYaml } from "yaml";
@@ -320,6 +324,18 @@ export {
 const TEMPLATE_CACHE_TTL_MS = 60_000;
 const templateCache = new Map<string, TemplateCacheEntry>();
 
+async function resolveWorkflowRadiusVersion(): Promise<string> {
+  const radPath = await ensureRadBinary();
+  const version = await radBinaryVersion(radPath);
+  const match = version?.match(/^v?(\d+\.\d+\.\d+)$/u);
+  if (!match) {
+    throw new Error(
+      `The extension-managed Radius CLI reported unsupported version "${version ?? ""}". Generated workflows require an exact stable release.`
+    );
+  }
+  return match[1];
+}
+
 async function fetchRadiusTemplate(
   fileName: string,
   ref = RADIUS_REF
@@ -524,6 +540,7 @@ export async function generateDeployWorkflow(
   appFile: string,
   options: DeployWorkflowOptions = {}
 ): Promise<Record<string, string>> {
+  const radiusVersion = await resolveWorkflowRadiusVersion();
   // Only the dispatcher + the Azure provider workflow are fetched and committed;
   // the AWS provider workflow is intentionally never fetched or committed. The
   // dispatcher's `aws:` job (which `uses:` the absent AWS provider file) is
@@ -538,12 +555,13 @@ export async function generateDeployWorkflow(
   // the AWS template; the generated AWS output is dropped below and never
   // committed.
   templates[DEPLOY_AWS_FILE] = templates[DEPLOY_AZURE_FILE];
-  const generated = coreGenerateDeployWorkflow(
-    env,
-    appFile,
-    templates,
-    options
-  );
+  const generated = coreGenerateDeployWorkflow(env, appFile, templates, {
+    ...options,
+    templateVars: {
+      ...(options.templateVars || {}),
+      RADIUS_VERSION: radiusVersion
+    }
+  });
   delete generated[DEPLOY_AWS_FILE];
   // Creating an environment should ONLY run the verify-credentials workflow.
   // The upstream dispatcher auto-triggers the deploy via a `workflow_run`
@@ -582,6 +600,7 @@ export async function generateDeployWorkflow(
 export async function generateDeleteWorkflow(
   env: string
 ): Promise<Record<string, string>> {
+  const radiusVersion = await resolveWorkflowRadiusVersion();
   const fetched = [
     DELETE_APP_DISPATCHER_FILE,
     DELETE_AZURE_FILE,
@@ -596,7 +615,9 @@ export async function generateDeleteWorkflow(
     templates[f] = fetchedBodies[i];
   });
   templates[DELETE_AWS_FILE] = templates[DELETE_AZURE_FILE];
-  const generated = coreGenerateDeleteWorkflow(env, templates);
+  const generated = coreGenerateDeleteWorkflow(env, templates, {
+    templateVars: { RADIUS_VERSION: radiusVersion }
+  });
   delete generated[DELETE_AWS_FILE];
   // The application dispatcher references the never-committed AWS provider file
   // via its `aws:` job; strip it so GitHub can parse the committed workflow. The

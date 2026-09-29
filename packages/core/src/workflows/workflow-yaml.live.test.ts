@@ -132,7 +132,8 @@ describe.skipIf(!LIVE)(
       const generated = generateDeployWorkflow(
         "prod",
         ".radius/app.bicep",
-        templates
+        templates,
+        { templateVars: { RADIUS_VERSION: "0.61.0" } }
       );
       assertAllValidYaml(generated, LIVE_REF);
     }, 30_000);
@@ -142,10 +143,14 @@ describe.skipIf(!LIVE)(
         [DELETE_APP_DISPATCHER_FILE, DELETE_AZURE_FILE, DELETE_AWS_FILE],
         DELETE_LIVE_REF
       );
-      const generated = generateDeleteWorkflow("prod", {
-        ...templates,
-        ...(await readLocalDeleteTemplates())
-      });
+      const generated = generateDeleteWorkflow(
+        "prod",
+        {
+          ...templates,
+          ...(await readLocalDeleteTemplates())
+        },
+        { templateVars: { RADIUS_VERSION: "0.61.0" } }
+      );
       assertAllValidYaml(generated, DELETE_LIVE_REF);
     }, 30_000);
 

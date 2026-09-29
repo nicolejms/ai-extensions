@@ -91,7 +91,7 @@ describe(".github/extension release assets", () => {
     ).toEqual(["--set database.resources.requests.cpu=500m"]);
   });
 
-  it("installs the immutable stable Radius release pinned by the action", () => {
+  it("installs the exact stable Radius release selected by the extension", () => {
     const action = parseYaml(
       readFileSync(
         join(EXTENSION_ROOT, "actions", "setup-control-plane", "action.yml"),
@@ -102,11 +102,40 @@ describe(".github/extension release assets", () => {
       (step) => step.name === "Install Radius CLI"
     );
 
-    expect(installStep?.env?.RADIUS_INSTALL_REF).toMatch(/^v\d+\.\d+\.\d+$/u);
+    expect(action.inputs?.["radius-version"]?.required).toBe(true);
+    expect(installStep?.env?.RADIUS_VERSION).toBe(
+      "${{ inputs.radius-version }}"
+    );
     expect(installStep?.run).toContain(
-      '/bin/bash install-rad.sh --version "${RADIUS_INSTALL_REF#v}"'
+      '/bin/bash install-rad.sh --version "$RADIUS_VERSION"'
+    );
+    expect(installStep?.run).toContain(
+      "radius-version must be an exact stable release"
+    );
+    expect(installStep?.run).toContain(
+      "Could not resolve Radius v${RADIUS_VERSION} to an immutable commit"
+    );
+    expect(installStep?.run).toContain(
+      "radius-project/radius/${RADIUS_SOURCE_SHA}/deploy/install.sh"
     );
     expect(installStep?.run).not.toContain("install-rad.sh edge");
+    expect(installStep?.run).not.toContain("RADIUS_INSTALL_REF");
+
+    for (const file of [
+      "run-rad-commands-azure.yml",
+      "run-rad-commands-aws.yml",
+      "delete-azure.yml",
+      "delete-aws.yml",
+      "delete-environment-azure.yml"
+    ]) {
+      const workflow = parseYaml(
+        readFileSync(join(EXTENSION_ROOT, file), "utf8")
+      );
+      const setup = Object.values(workflow.jobs)
+        .flatMap((job) => job.steps ?? [])
+        .find((step) => step.name === "Set up control plane");
+      expect(setup?.with?.["radius-version"], file).toBe("{{RADIUS_VERSION}}");
+    }
   });
 
   it("scopes residual application cleanup to the target namespace and Radius label", () => {

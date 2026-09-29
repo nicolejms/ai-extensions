@@ -17,6 +17,7 @@ interface InfraMockState {
   // PUT — e.g. a protected branch) so tests can exercise the `failed` path.
   failCommits: boolean;
   noopCommits: boolean;
+  radVersion: string | null;
 }
 
 // Shared mock state for the ./gh.ts stub. `vi.hoisted` runs before the module
@@ -42,11 +43,11 @@ const { h, BASE_UPSTREAM } = vi.hoisted<{
     "run-rad-commands.yml":
       "name: deploy\non:\n  workflow_dispatch:\n    inputs:\n      environment:\n        default: '{{ENV}}'\njobs:\n  detect:\n    run: echo hi\n  azure:\n    uses: ./.github/workflows/run-rad-commands-azure.yml\n  aws:\n    uses: ./.github/workflows/run-rad-commands-aws.yml\n",
     "run-rad-commands-azure.yml":
-      "name: deploy-azure\non:\n  workflow_call:\n    inputs:\n      environment:\n        type: string\n        required: true\nenv:\n  APP_FILE: '{{APP_FILE}}'\njobs:\n  a:\n    uses: radius-project/ai-extensions/.github/extension/actions/run-rad-commands@{{RADIUS_REF}}\n",
+      "name: deploy-azure\non:\n  workflow_call:\n    inputs:\n      environment:\n        type: string\n        required: true\nenv:\n  APP_FILE: '{{APP_FILE}}'\n  RADIUS_VERSION: '{{RADIUS_VERSION}}'\njobs:\n  a:\n    uses: radius-project/ai-extensions/.github/extension/actions/run-rad-commands@{{RADIUS_REF}}\n",
     "delete-application.yml":
       "name: delete\non:\n  workflow_dispatch:\n    inputs:\n      environment:\n        default: '{{ENV}}'\njobs:\n  detect:\n    run: echo hi\n  azure:\n    uses: ./.github/workflows/delete-azure.yml\n  aws:\n    uses: ./.github/workflows/delete-aws.yml\n",
     "delete-azure.yml":
-      "name: delete-azure\non:\n  workflow_call:\n    inputs:\n      environment:\n        type: string\n        required: true\njobs:\n  a:\n    uses: radius-project/ai-extensions/.github/extension/actions/delete-resource@{{RADIUS_REF}}\n"
+      "name: delete-azure\non:\n  workflow_call:\n    inputs:\n      environment:\n        type: string\n        required: true\nenv:\n  RADIUS_VERSION: '{{RADIUS_VERSION}}'\njobs:\n  a:\n    uses: radius-project/ai-extensions/.github/extension/actions/delete-resource@{{RADIUS_REF}}\n"
   };
   return {
     BASE_UPSTREAM,
@@ -56,6 +57,7 @@ const { h, BASE_UPSTREAM } = vi.hoisted<{
       fetches: [],
       failCommits: false, // when true, commitFileToRepo rejects
       noopCommits: false,
+      radVersion: "v0.61.0",
       upstream: { ...BASE_UPSTREAM }
     }
   };
@@ -79,6 +81,10 @@ function expireTemplateCache(): void {
 
 afterEach(() => {
   vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  h.radVersion = "v0.61.0";
 });
 
 vi.mock("./gh.js", () => ({
@@ -111,6 +117,11 @@ vi.mock("./gh.js", () => ({
     (h.committed[branch] ||= {})[path] = content;
     return true;
   }
+}));
+
+vi.mock("@radius-project/adapter-shared", () => ({
+  ensureRadBinary: async () => "/managed/rad",
+  radBinaryVersion: async () => h.radVersion
 }));
 
 const {
@@ -462,8 +473,11 @@ ${BASE_UPSTREAM["verify-azure.yml"]}
       `# provider comment\npermissions:\n  contents: read\n` +
       BASE_UPSTREAM["run-rad-commands-azure.yml"];
     h.upstream["delete-azure.yml"] =
-      `# provider comment\nenv:\n  UPSTREAM_FLAG: enabled\n` +
-      BASE_UPSTREAM["delete-azure.yml"];
+      `# provider comment\n` +
+      BASE_UPSTREAM["delete-azure.yml"].replace(
+        "env:\n",
+        "env:\n  UPSTREAM_FLAG: enabled\n"
+      );
 
     await expect(generateVerifyWorkflow("prod", "azure")).resolves.toContain(
       "x-upstream-metadata: retained"
@@ -493,6 +507,35 @@ describe("generateDeleteWorkflow", () => {
     ]);
     expect(files["delete-aws.yml"]).toBeUndefined();
   });
+
+  it("writes the extension-managed Radius version into deploy and delete workflows", async () => {
+    h.radVersion = "v1.2.3";
+
+    const deploy = await generateDeployWorkflow("dev", ".radius/app.bicep");
+    const remove = await generateDeleteWorkflow("dev");
+
+    expect(deploy["run-rad-commands-azure.yml"]).toContain(
+      "RADIUS_VERSION: '1.2.3'"
+    );
+    expect(remove["delete-azure.yml"]).toContain("RADIUS_VERSION: '1.2.3'");
+    expect(remove["delete-environment-azure.yml"]).toContain(
+      'radius-version: "1.2.3"'
+    );
+  });
+
+  it.each([null, "edge", "v1.2.3-rc1"])(
+    "refuses unsupported managed Radius version %s",
+    async (version) => {
+      h.radVersion = version;
+
+      await expect(
+        generateDeployWorkflow("dev", ".radius/app.bicep")
+      ).rejects.toThrow(/require an exact stable release/u);
+      await expect(generateDeleteWorkflow("dev")).rejects.toThrow(
+        /require an exact stable release/u
+      );
+    }
+  );
 
   it("strips the aws job from the application dispatcher so GitHub can parse it", async () => {
     const files = await generateDeleteWorkflow("dev");
