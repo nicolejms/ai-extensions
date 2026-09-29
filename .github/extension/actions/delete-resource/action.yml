@@ -31,6 +31,14 @@ inputs:
       resources those records created may be left orphaned and need manual cleanup.
     required: false
     default: "false"
+  target-kubeconfig:
+    description: Optional kubeconfig for the cluster that hosts rendered application resources.
+    required: false
+    default: ""
+  namespace:
+    description: Kubernetes namespace that hosts rendered application resources.
+    required: false
+    default: default
 
 runs:
   using: composite
@@ -42,6 +50,8 @@ runs:
         RESOURCE_NAME: ${{ inputs.name }}
         REFRESH_AZURE_OIDC_TOKEN: ${{ inputs.azure-oidc-token-refresh }}
         FORCE_DELETE: ${{ inputs.force }}
+        TARGET_KUBECONFIG: ${{ inputs.target-kubeconfig }}
+        TARGET_NAMESPACE: ${{ inputs.namespace }}
       run: |
         # pipefail so a failed `rad` whose output is piped through `tee` is detected
         # via PIPESTATUS rather than masked by tee's exit code. -e/-u make setup and
@@ -161,6 +171,48 @@ runs:
           OUTCOME="failed"
           echo "Failed to delete $SAFE_TYPE '$SAFE_NAME'." >&2
           exit "$EXIT"
+        fi
+
+        # Radius owns every Kubernetes object carrying its application label.
+        # A successful delete must not leave any of those objects behind. Sweep
+        # the same rendered kinds the cloud journey verifies, scoped to both the
+        # configured namespace and application label so unrelated workloads are
+        # never touched. This also removes autoscalers that older Radius builds
+        # can strand after deleting their target Deployment.
+        if [ "$RESOURCE_TYPE" = "application" ]; then
+          KUBECTL=(kubectl)
+          if [ -n "$TARGET_KUBECONFIG" ]; then
+            KUBECTL+=(--kubeconfig "$TARGET_KUBECONFIG")
+          fi
+          APPLICATION_LABEL=$(printf '%s' "$RESOURCE_NAME" | tr '[:upper:]' '[:lower:]')
+          SELECTOR="radapp.io/application=$APPLICATION_LABEL"
+          RENDERED_RESOURCES="deployments,statefulsets,daemonsets,services,horizontalpodautoscalers,pods"
+
+          if ! "${KUBECTL[@]}" delete "$RENDERED_RESOURCES" \
+              --namespace "$TARGET_NAMESPACE" \
+              --selector "$SELECTOR" \
+              --ignore-not-found=true \
+              --wait=true \
+              --timeout=120s; then
+            OUTCOME="failed"
+            EXIT=1
+            exit 1
+          fi
+
+          if ! REMAINING=$("${KUBECTL[@]}" get "$RENDERED_RESOURCES" \
+              --namespace "$TARGET_NAMESPACE" \
+              --selector "$SELECTOR" \
+              --output name); then
+            OUTCOME="failed"
+            EXIT=1
+            exit 1
+          fi
+          if [ -n "$REMAINING" ]; then
+            printf 'Radius application cleanup left Kubernetes resources behind:\n%s\n' "$REMAINING" >&2
+            OUTCOME="failed"
+            EXIT=1
+            exit 1
+          fi
         fi
         echo "✅ Deleted $SAFE_TYPE '$SAFE_NAME'."
 

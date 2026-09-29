@@ -215,6 +215,8 @@ jobs:
           name: ${{ inputs.name }}
           force: ${{ inputs.force }}
           azure-oidc-token-refresh: "${{ vars.AZURE_CLIENT_ID != '' }}"
+          target-kubeconfig: ${{ env.RADIUS_TARGET_KUBECONFIG }}
+          namespace: ${{ vars.KUBERNETES_NAMESPACE || 'default' }}
 
       - name: Discard the deleted application's deployed graph
         if: ${{ inputs.resource_type == 'application' }}

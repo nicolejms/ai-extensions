@@ -91,6 +91,67 @@ describe(".github/extension release assets", () => {
     ).toEqual(["--set database.resources.requests.cpu=500m"]);
   });
 
+  it("installs the immutable stable Radius release pinned by the action", () => {
+    const action = parseYaml(
+      readFileSync(
+        join(EXTENSION_ROOT, "actions", "setup-control-plane", "action.yml"),
+        "utf8"
+      )
+    );
+    const installStep = action.runs.steps.find(
+      (step) => step.name === "Install Radius CLI"
+    );
+
+    expect(installStep?.env?.RADIUS_INSTALL_REF).toMatch(/^v\d+\.\d+\.\d+$/u);
+    expect(installStep?.run).toContain(
+      '/bin/bash install-rad.sh --version "${RADIUS_INSTALL_REF#v}"'
+    );
+    expect(installStep?.run).not.toContain("install-rad.sh edge");
+  });
+
+  it("scopes residual application cleanup to the target namespace and Radius label", () => {
+    const action = parseYaml(
+      readFileSync(
+        join(EXTENSION_ROOT, "actions", "delete-resource", "action.yml"),
+        "utf8"
+      )
+    );
+    const deleteStep = action.runs.steps.find(
+      (step) => step.name === "Delete Radius resource"
+    );
+
+    expect(action.inputs?.["target-kubeconfig"]?.default).toBe("");
+    expect(action.inputs?.namespace?.default).toBe("default");
+    expect(deleteStep?.run).toContain(
+      'SELECTOR="radapp.io/application=$APPLICATION_LABEL"'
+    );
+    expect(deleteStep?.run).toContain(
+      'RENDERED_RESOURCES="deployments,statefulsets,daemonsets,services,horizontalpodautoscalers,pods"'
+    );
+    expect(deleteStep?.run).toContain('--namespace "$TARGET_NAMESPACE"');
+    expect(deleteStep?.run).toContain('--selector "$SELECTOR"');
+    expect(deleteStep?.run).toContain("--ignore-not-found=true");
+    expect(deleteStep?.run).toContain("--timeout=120s");
+    expect(deleteStep?.run).toContain(
+      "Radius application cleanup left Kubernetes resources behind"
+    );
+
+    for (const file of ["delete-azure.yml", "delete-aws.yml"]) {
+      const workflow = parseYaml(
+        readFileSync(join(EXTENSION_ROOT, file), "utf8")
+      );
+      const deleteResource = workflow.jobs.delete.steps.find(
+        (step) => step.name === "Delete Radius resource"
+      );
+      expect(deleteResource?.with?.["target-kubeconfig"], file).toBe(
+        "${{ env.RADIUS_TARGET_KUBECONFIG }}"
+      );
+      expect(deleteResource?.with?.namespace, file).toBe(
+        "${{ vars.KUBERNETES_NAMESPACE || 'default' }}"
+      );
+    }
+  });
+
   // A `workflow_dispatch` boolean input arrives as the string "true"/"false"
   // (including its declared default), so handing it straight to a reusable
   // workflow's `type: boolean` input passes a string where a boolean is

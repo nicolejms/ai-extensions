@@ -237,6 +237,8 @@ jobs:
           resource-type: ${{ inputs.resource_type }}
           name: ${{ inputs.name }}
           force: ${{ inputs.force }}
+          target-kubeconfig: ${{ env.RADIUS_TARGET_KUBECONFIG }}
+          namespace: ${{ vars.KUBERNETES_NAMESPACE || 'default' }}
 
       - name: Discard the deleted application's deployed graph
         if: ${{ inputs.resource_type == 'application' }}
