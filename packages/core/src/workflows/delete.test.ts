@@ -196,26 +196,6 @@ describe("generateDeleteWorkflow", () => {
     expect(files[DELETE_APP_DISPATCHER_FILE]).toContain("${{ github.sha }}");
   });
 
-  it("fills caller supplied template variables without overriding reserved values", () => {
-    const templates = {
-      ...BASE_TEMPLATES,
-      [DELETE_AZURE_FILE]: `${BASE_TEMPLATES[DELETE_AZURE_FILE]}env2:\n  RADIUS_VERSION: "{{RADIUS_VERSION}}"\n  ENVIRONMENT_COPY: "{{ENV}}"\n`
-    };
-    const files = generateDeleteWorkflow("prod", templates, {
-      templateVars: {
-        RADIUS_VERSION: "1.2.3",
-        ENV: "staging",
-        RADIUS_REF: "feature/ref"
-      }
-    });
-
-    expect(files[DELETE_AZURE_FILE]).toContain('RADIUS_VERSION: "1.2.3"');
-    expect(files[DELETE_AZURE_FILE]).toContain('ENVIRONMENT_COPY: "prod"');
-    expect(files[DELETE_AZURE_FILE]).toContain(
-      `delete-resource@${DELETE_RADIUS_REF}`
-    );
-  });
-
   it("renders valid YAML for every generated file", () => {
     const files = generateDeleteWorkflow("prod", BASE_TEMPLATES);
 

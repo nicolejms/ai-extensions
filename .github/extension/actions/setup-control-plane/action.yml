@@ -4,15 +4,9 @@
 # run-rad-commands-azure.yml. Installs the runner tooling, stands up the ephemeral
 # k3d control-plane cluster, stores the target-cluster kubeconfig as a Secret, and
 # installs Radius. Reads RADIUS_TARGET_KUBECONFIG from the job environment (exported
-# via $GITHUB_ENV by the caller) and receives the exact Radius release selected by
-# the extension.
+# via $GITHUB_ENV by the caller), so it needs no inputs.
 name: Radius - Set up control plane
 description: Install tooling, create the ephemeral k3d control plane, and install Radius.
-
-inputs:
-  radius-version:
-    description: Exact stable Radius CLI and control-plane release selected by the extension.
-    required: true
 
 runs:
   using: composite
@@ -50,29 +44,15 @@ runs:
     - name: Install Radius CLI
       shell: bash
       env:
-        RADIUS_VERSION: ${{ inputs.radius-version }}
+        # Pin the Radius install script to a stable release and verify its checksum
+        # before running it, rather than piping from main. The CLI channel stays
+        # `edge` so the workflow still exercises the latest control-plane build.
+        RADIUS_INSTALL_REF: v0.61.0
+        RADIUS_INSTALL_SHA256: bf2fdf0248b39ac2a0222326f8458824924872816737a08af3558bddd16c392b
       run: |
-        if [[ ! "$RADIUS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "::error::radius-version must be an exact stable release; got '$RADIUS_VERSION'."
-          exit 1
-        fi
-        mapfile -t RADIUS_REFS < <(
-          git ls-remote https://github.com/radius-project/radius.git \
-            "refs/tags/v${RADIUS_VERSION}" \
-            "refs/tags/v${RADIUS_VERSION}^{}"
-        )
-        RADIUS_SOURCE_SHA="$(
-          printf '%s\n' "${RADIUS_REFS[@]}" |
-            awk '$2 ~ /\^\{\}$/ { print $1; found=1 } END { if (!found && NR == 1) print $1 }'
-        )"
-        if [[ ! "$RADIUS_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-          echo "::error::Could not resolve Radius v${RADIUS_VERSION} to an immutable commit."
-          exit 1
-        fi
-        curl --proto '=https' --tlsv1.2 -fsSL --retry 5 --retry-connrefused \
-          "https://raw.githubusercontent.com/radius-project/radius/${RADIUS_SOURCE_SHA}/deploy/install.sh" \
-          -o install-rad.sh
-        /bin/bash install-rad.sh --version "$RADIUS_VERSION"
+        curl -sSL "https://raw.githubusercontent.com/radius-project/radius/${RADIUS_INSTALL_REF}/deploy/install.sh" -o install-rad.sh
+        echo "${RADIUS_INSTALL_SHA256}  install-rad.sh" | sha256sum -c -
+        /bin/bash install-rad.sh edge
         rm -f install-rad.sh
         rad version
 

@@ -32,11 +32,6 @@ export const DELETE_ENV_GUARD_STEP_NAME =
   "Guard - environment has no deployed applications";
 
 export type DeleteWorkflowFiles = Record<string, string>;
-export type DeleteWorkflowTemplateVars = Record<string, string>;
-
-export interface DeleteWorkflowOptions {
-  templateVars?: DeleteWorkflowTemplateVars;
-}
 
 /**
  * Build the delete GitHub Actions workflows, mirroring the composite-action
@@ -46,10 +41,9 @@ export interface DeleteWorkflowOptions {
  * `delete-application.yml` and `delete-environment.yml` dispatchers plus the
  * reusable provider workflows — `delete-azure.yml` / `delete-aws.yml` for the
  * application-delete path and `delete-environment-azure.yml` for the
- * environment-delete path. The dispatchers fill `{{ENV}}` (the dispatch
+ * environment-delete path. The dispatchers only fill `{{ENV}}` (the dispatch
  * default); the provider workflows also pin their composite actions to
- * `{{RADIUS_REF}}`. Callers may supply additional `{{UPPER_SNAKE}}` template
- * variables for values such as the extension-selected Radius release.
+ * `{{RADIUS_REF}}`.
  *
  * `templates` maps the committed file name to the raw template body fetched
  * from `radius-project/ai-extensions`. The caller must supply every file;
@@ -57,8 +51,7 @@ export interface DeleteWorkflowOptions {
  */
 export function generateDeleteWorkflow(
   env: string,
-  templates: DeleteWorkflowFiles,
-  options: DeleteWorkflowOptions = {}
+  templates: DeleteWorkflowFiles
 ): DeleteWorkflowFiles {
   const pick = (file: string): string => {
     const body = templates[file];
@@ -72,24 +65,21 @@ export function generateDeleteWorkflow(
   const files: DeleteWorkflowFiles = {
     [DELETE_APP_DISPATCHER_FILE]: fillTemplate(
       pick(DELETE_APP_DISPATCHER_FILE),
-      { ...(options.templateVars || {}), ENV: env }
+      { ENV: env }
     ),
     [DELETE_ENV_DISPATCHER_FILE]: fillTemplate(
       pick(DELETE_ENV_DISPATCHER_FILE),
-      { ...(options.templateVars || {}), ENV: env }
+      { ENV: env }
     ),
     [DELETE_ENV_AZURE_FILE]: fillTemplate(pick(DELETE_ENV_AZURE_FILE), {
-      ...(options.templateVars || {}),
       ENV: env,
       RADIUS_REF: DELETE_RADIUS_REF
     }),
     [DELETE_AZURE_FILE]: fillTemplate(pick(DELETE_AZURE_FILE), {
-      ...(options.templateVars || {}),
       ENV: env,
       RADIUS_REF: DELETE_RADIUS_REF
     }),
     [DELETE_AWS_FILE]: fillTemplate(pick(DELETE_AWS_FILE), {
-      ...(options.templateVars || {}),
       ENV: env,
       RADIUS_REF: DELETE_RADIUS_REF
     })

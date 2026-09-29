@@ -149,8 +149,6 @@ jobs:
 
       - name: Set up control plane
         uses: radius-project/ai-extensions/.github/extension/actions/setup-control-plane@{{RADIUS_REF}}
-        with:
-          radius-version: "{{RADIUS_VERSION}}"
 
       - name: Project cloud OIDC tokens into Radius pods
         run: |
@@ -239,8 +237,6 @@ jobs:
           resource-type: ${{ inputs.resource_type }}
           name: ${{ inputs.name }}
           force: ${{ inputs.force }}
-          target-kubeconfig: ${{ env.RADIUS_TARGET_KUBECONFIG }}
-          namespace: ${{ vars.KUBERNETES_NAMESPACE || 'default' }}
 
       - name: Discard the deleted application's deployed graph
         if: ${{ inputs.resource_type == 'application' }}
