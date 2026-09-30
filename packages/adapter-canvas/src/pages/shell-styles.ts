@@ -549,15 +549,11 @@ export const SHELL_STYLE_CSS = `  /* ─── Radius design tokens (from Figma 
   .react-flow__controls-button:hover { background: var(--rad-bg-subtle); }
   .react-flow__controls-button svg { fill: currentColor; }
   .react-flow__minimap { background: var(--rad-surface); border: 1px solid var(--rad-stroke); border-radius: 6px; }
-  /* The dot grid is painted by React Flow onto an SVG <circle fill> PRESENTATION
-     ATTRIBUTE, and Chromium does not substitute var() there — a var() passed via
-     the Background "color" prop is discarded and the dots fall back to black.
-     Theme it as a CSS property instead, which does resolve var(). */
-  .react-flow__background circle { fill: var(--rad-grid); }
-  /* React Flow v12 paints dots through its own two-class rule, which outranks
-     the selector above; feed it the Radius token through its variable. */
+  /* React Flow paints the dot grid from its --xy-background-pattern-color
+     variable, so theme the dots there. A var() passed through the Background
+     "color" prop would land in an SVG fill attribute, where Chromium does not
+     resolve it and the dots fall back to black. */
   .react-flow { --xy-background-pattern-color: var(--rad-grid); }
-  .react-flow__background path { stroke: var(--rad-grid); }
   /* Delete confirmation dialog (Figma type-to-confirm flow). Global because
      every surface that can delete a deployment shares this one dialog. */
   .rad-ddlg { max-width:480px; width:90%; margin:0; padding:0; background:var(--rad-surface); color:var(--rad-text); border:1px solid var(--rad-stroke); border-radius:12px; box-shadow:0 8px 24px var(--rad-shadow); overflow:hidden; }

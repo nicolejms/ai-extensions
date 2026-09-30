@@ -45,7 +45,8 @@ export type StateHook<T> = (
   initial: readonly T[]
 ) => [readonly T[], (next: readonly T[]) => void, unknown];
 
-// React Flow v12 animates the fit and resolves once it settles.
+// React Flow v12 queues the fit until nodes are measured and resolves once it
+// is applied.
 export interface ReactFlowInstance {
   fitView(options: Record<string, unknown>): Promise<boolean>;
 }

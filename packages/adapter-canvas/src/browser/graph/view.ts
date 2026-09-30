@@ -6,7 +6,7 @@
 // asserts the element tree, the handlers and the update path without a browser.
 // Layout, painting and pointer behaviour remain Chromium concerns.
 
-import type { ClockPort, DomElement } from "../ports.js";
+import type { DomElement } from "../ports.js";
 import type {
   GraphEdge,
   GraphNode,
@@ -340,11 +340,10 @@ interface AppProps {
   initialEdges: readonly GraphEdge[];
 }
 
+// React Flow applies this on mount through the fitView prop, and the app
+// reuses it when the node set changes. v12 queues either fit until the nodes
+// are measured, so neither needs a timer.
 const FIT_VIEW_OPTIONS = { padding: 0.18 };
-// A changed node set is re-laid out before it is pushed into React state, so
-// the fit that frames it waits for that render to paint. React Flow handles
-// the initial fit itself; an extra delayed fit would undo early user zoom.
-const FIT_AFTER_RESHAPE_MS = 40;
 
 // React Flow v12 anchors each dot half a gap from the pattern origin; v11
 // anchored it half a dot. This offset restores the v11 grid position so the
@@ -360,8 +359,11 @@ function nodeSignature(nodes: readonly GraphNode[]): string {
   return [...nodes.map((node) => node.id)].sort().join("\u0000");
 }
 
-// Fitting is presentation only: a viewport that refuses to fit, whether it
-// throws or rejects its promise, must not take the graph down with it.
+// Fitting is presentation only: a viewport that refuses to fit must not take
+// the graph down with it. React Flow v12's fitView is async, so in production a
+// failure arrives as a rejection and the .catch is the branch that matters.
+// The try/catch is defence for a port implementation that throws synchronously;
+// keep both halves.
 function fitView(
   instance: ReactFlowInstance,
   options: Record<string, unknown>
@@ -382,7 +384,6 @@ function fitView(
 // viewport may not frame the new graph at all.
 export function createGraphApp(
   vendor: GraphVendor,
-  clock: ClockPort,
   nodeTypes: Record<string, unknown>,
   updater: UpdaterBinding
 ): (props: AppProps) => unknown {
@@ -399,6 +400,7 @@ export function createGraphApp(
     );
     const instanceRef = react.useRef<ReactFlowInstance | null>(null);
     const signatureRef = react.useRef(nodeSignature(props.initialNodes));
+    const refitRef = react.useRef(false);
 
     react.useLayoutEffect(() => {
       updater.fn = (nextNodes, nextEdges) => {
@@ -407,17 +409,24 @@ export function createGraphApp(
         const signature = nodeSignature(nextNodes);
         if (signature === signatureRef.current) return;
         signatureRef.current = signature;
-        const instance = instanceRef.current;
-        if (!instance) return;
-        clock.setTimeout(
-          () => fitView(instance, FIT_VIEW_OPTIONS),
-          FIT_AFTER_RESHAPE_MS
-        );
+        refitRef.current = true;
       };
       return () => {
         updater.fn = null;
       };
     }, []);
+
+    // React Flow copies the nodes prop into its store from its own passive
+    // effect, which runs before this parent effect. Asking for the fit here
+    // means React Flow queues it against the new nodes and applies it once
+    // they are measured. Asked any earlier, it can resolve against the old
+    // nodes and frame a graph that is no longer shown.
+    react.useEffect(() => {
+      if (!refitRef.current) return;
+      refitRef.current = false;
+      const instance = instanceRef.current;
+      if (instance) fitView(instance, FIT_VIEW_OPTIONS);
+    }, [nodes]);
 
     return h(
       flow.default,
@@ -513,7 +522,6 @@ export interface MountedGraph {
 
 export interface MountOptions {
   vendor: GraphVendor;
-  clock: ClockPort;
   host: unknown;
   settings: GraphSettings;
   deps: NodeCardDeps;
@@ -525,13 +533,13 @@ export interface MountOptions {
 // Mount the flow application into its own host element and return the handle
 // the graph controller drives.
 export function mountGraph(options: MountOptions): MountedGraph {
-  const { vendor, clock } = options;
+  const { vendor } = options;
   const h = vendor.react.createElement.bind(vendor.react);
   const nodeTypes = {
     rad: createNodeComponent(vendor, options.settings, options.deps)
   };
   const updater: UpdaterBinding = { fn: null };
-  const app = createGraphApp(vendor, clock, nodeTypes, updater);
+  const app = createGraphApp(vendor, nodeTypes, updater);
   const boundary = createErrorBoundary(vendor, options.reload);
   const root: ReactRoot = vendor.reactDom.createRoot(options.host);
   root.render(
