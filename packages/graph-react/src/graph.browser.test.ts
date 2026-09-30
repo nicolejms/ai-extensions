@@ -335,7 +335,7 @@ describe("public host-neutral React API", () => {
         resources: [
           {
             ...resource,
-            connections: [{ id: "missing" }]
+            connections: [{ id: "missing", direction: "Outbound" }]
           }
         ]
       },
