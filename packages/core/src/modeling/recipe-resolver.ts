@@ -53,13 +53,16 @@ export async function resolveRecipeOutputs(
   for (const appRes of appResources) {
     const baseType = appRes.type.split("@")[0];
 
-    // Match a recipe from the default recipe pack by resource type. Packs key
-    // `Radius.*` types only, so a legacy `Applications.*` type simply finds no
-    // recipe rather than being silently translated. Recipe resolution for
-    // custom/unlisted types is owned by recipe packs at deploy time and the
-    // radius-app-bicep skill — this modeling code no longer fabricates outputs
-    // when nothing matches.
-    const matchingRecipe = recipes.find((r) => r.resourceType === baseType);
+    // Match a recipe from the default recipe pack by resource type. Only
+    // `Radius.*` types are supported, so a legacy `Applications.*` type is
+    // refused before lookup, even if a pack still keys it, rather than being
+    // silently resolved. Recipe resolution for custom/unlisted types is owned
+    // by recipe packs at deploy time and the radius-app-bicep skill — this
+    // modeling code no longer fabricates outputs when nothing matches.
+    const matchingRecipe =
+      baseType.toLowerCase().startsWith("radius.") ?
+        recipes.find((r) => r.resourceType === baseType)
+      : undefined;
 
     let outputResources = matchingRecipe?.concreteResources || [];
 

@@ -344,6 +344,38 @@ describe("resolveRecipeOutputs", () => {
     expect(resolved[0].outputResources).toEqual([]);
   });
 
+  it("refuses a retired Applications.* type even when a pack still keys it", async () => {
+    const gh = fakeGitHub();
+    const recipes = [
+      {
+        name: "containers",
+        resourceType: "Applications.Core/containers",
+        templateKind: "bicep",
+        templatePath: "ghcr.io/radius-project/kube-recipes/containers:latest",
+        concreteResources: [
+          {
+            name: "deployment",
+            type: "apps/Deployment",
+            provider: "kubernetes",
+            displayType: "Deployment"
+          }
+        ]
+      }
+    ];
+
+    const resolved = await resolveRecipeOutputs(
+      gh,
+      [
+        { name: "api", type: "Applications.Core/containers@2023-10-01-preview" }
+      ],
+      recipes,
+      "aws"
+    );
+
+    expect(resolved[0].recipe).toBeNull();
+    expect(resolved[0].outputResources).toEqual([]);
+  });
+
   it("leaves a Deployment display type alone when it already names a cluster service", async () => {
     const gh = fakeGitHub();
     const recipes = [

@@ -44,6 +44,15 @@ describe("radiusBrandMarkSvg", () => {
     expect(svg).toContain('viewBox="0 0 128 128"');
   });
 
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, '1" onload="alert(1)'])(
+    "rejects size %s before it reaches the markup",
+    (size) => {
+      expect(() => radiusBrandMarkSvg({ size: size as number })).toThrow(
+        RangeError
+      );
+    }
+  );
+
   it("names the mark for assistive technology when it carries meaning", () => {
     const svg = radiusBrandMarkSvg({ title: "Radius" });
     expect(svg).toContain('role="img" aria-label="Radius"');

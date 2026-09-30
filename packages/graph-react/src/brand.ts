@@ -55,6 +55,11 @@ export function radiusBrandMarkSvg(
   options: RadiusBrandMarkOptions = {}
 ): string {
   const size = options.size ?? 28;
+  // The size is interpolated into markup, so a JavaScript caller that ignores
+  // the type must not be able to smuggle attributes through it.
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
+    throw new RangeError("Radius brand mark size must be a positive number.");
+  }
   const { width, height, body } = RADIUS_BRAND_MARK;
   const label =
     options.title === undefined ?

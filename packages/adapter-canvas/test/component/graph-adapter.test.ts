@@ -146,7 +146,7 @@ describe("Canvas entry with the canonical renderer in Chromium", () => {
         "rgba(0, 0, 0, 0)"
       );
       const control = await within(real.host).findByRole("button", {
-        name: "zoom in"
+        name: "Zoom In"
       });
       expect(getComputedStyle(control).boxSizing).toBe("content-box");
       const controlBox = control.getBoundingClientRect();

@@ -23,6 +23,10 @@ function optionalText(value: unknown, field: string): string | undefined {
   return value;
 }
 
+function isRadiusType(type: string): boolean {
+  return type.toLowerCase().startsWith("radius.");
+}
+
 /** Identity for host-owned caches; same-named applications never share context. */
 export function graphContextKey(context: GraphContext): string {
   const application = parseResourceId(
@@ -30,11 +34,13 @@ export function graphContextKey(context: GraphContext): string {
   );
   if (
     !application ||
+    application.segments.length !== 1 ||
+    application.type.toLowerCase() !== "radius.core/applications" ||
     application.plane.type !== context.plane.type ||
     application.plane.name !== context.plane.name
   ) {
     throw new TypeError(
-      "Live graph applicationId must belong to the selected plane."
+      "Live graph applicationId must be a Radius.Core/applications resource on the selected plane."
     );
   }
   return JSON.stringify([
@@ -84,6 +90,13 @@ export function normalizeLiveGraph(
       ),
       connections: []
     };
+    // Only Radius.* types are supported. Check the declared type, not the ID's
+    // provider: a nested resource ID can name a different provider.
+    if (!isRadiusType(resource.type)) {
+      throw new TypeError(
+        `Unsupported live graph resource type ${resource.type}: ${id}`
+      );
+    }
     const entries = Array.isArray(raw.connections) ? raw.connections : [];
     const signature = JSON.stringify([
       resource,
@@ -131,17 +144,21 @@ export function normalizeLiveGraph(
       edges.set(JSON.stringify([source, target]), { source, target });
     }
   }
+  const targetsBySource = new Map<string, string[]>();
+  for (const { source, target } of edges.values()) {
+    const targets = targetsBySource.get(source);
+    if (targets) targets.push(target);
+    else targetsBySource.set(source, [target]);
+  }
   return {
     kind: "live",
     context: { ...context, plane: { ...context.plane } },
     resources: resources.map((resource) => ({
       ...resource,
-      connections: [...edges.values()]
-        .filter((edge) => edge.source === resource.id)
-        .map((edge) => ({
-          id: edge.target,
-          direction: "Outbound"
-        }))
+      connections: (targetsBySource.get(resource.id) ?? []).map((target) => ({
+        id: target,
+        direction: "Outbound"
+      }))
     })),
     warnings
   };

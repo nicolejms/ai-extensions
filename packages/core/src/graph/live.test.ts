@@ -172,6 +172,7 @@ describe("live UCP graph normalization", () => {
     { resources: [{ ...web, id: "bad" }] },
     { resources: [{ ...web, name: "" }] },
     { resources: [{ ...web, type: 4 }] },
+    { resources: [{ ...web, type: "Applications.Core/containers" }] },
     { resources: [{ ...web, connections: {} }] },
     { resources: [{ ...web, provider: 1 }] },
     { resources: [{ ...web, provisioningState: false }] },
@@ -187,11 +188,33 @@ describe("live UCP graph normalization", () => {
   it.each([
     { ...context, applicationId: "" },
     { ...context, applicationId: "bad" },
+    { ...context, applicationId: web.id },
+    {
+      ...context,
+      applicationId: context.applicationId + "/Radius.Core/applications/nested"
+    },
     { ...context, connectionId: "" },
     { ...context, plane: { type: "other", name: "local" } },
     { ...context, plane: { type: "radius", name: "other" } }
   ])("rejects invalid or mismatched context %#", (input) => {
     expect(() => graphContextKey(input)).toThrow(TypeError);
+  });
+  it("judges support by the declared type, not the ID's provider", () => {
+    const nested = {
+      id: id("Other.Provider/hosts", "host") + "/containers/web",
+      name: "web",
+      type: "Radius.Compute/containers"
+    };
+    expect(
+      normalizeLiveGraph({ resources: [nested] }, context).resources[0].id
+    ).toBe(nested.id);
+  });
+  it("keys an application ID regardless of type casing", () => {
+    const lower = {
+      ...context,
+      applicationId: id("radius.core/applications", "application")
+    };
+    expect(JSON.parse(graphContextKey(lower))[3]).toBe(lower.applicationId);
   });
   it("preserves empty optional upstream strings without manufacturing a status", () => {
     const result = normalizeLiveGraph(

@@ -110,8 +110,10 @@ if (values.inside) {
       name,
       "--network",
       "none",
-      "--ipc",
-      "host",
+      // Private shared memory for Chromium; the host IPC namespace would give
+      // candidate package code a channel that --network none does not close.
+      "--shm-size",
+      "1g",
       "--mount",
       `type=bind,source=${output},target=/receipts`,
       values.image,
@@ -128,6 +130,7 @@ if (values.inside) {
     created = true;
     const container = JSON.parse(docker(["inspect", name]))[0];
     assert.equal(container.HostConfig.NetworkMode, "none");
+    assert.notEqual(container.HostConfig.IpcMode, "host");
     writeFileSync(
       join(output, "container.json"),
       JSON.stringify(
