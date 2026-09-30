@@ -594,7 +594,7 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
     node: process.version,
     versions,
     configHashes,
-    fixtureLockSha256: hash(readFileSync(join(fixture, "package-lock.json"))),
+    resolvedLockSha256: hash(readFileSync(join(fixture, "package-lock.json"))),
     serverSha256: hash(readFileSync("/headlamp/headlamp-server")),
     frontendIndexSha256: hash(readFileSync("/headlamp/frontend/index.html")),
     graphViewCss: {
@@ -608,6 +608,10 @@ async function qualify(root, seeds, output, { auditCss = false } = {}) {
     result: "in_progress",
     candidateTarballs: {}
   };
+  cpSync(
+    join(fixture, "package-lock.json"),
+    join(output, "resolved-package-lock.json")
+  );
   save(join(output, "receipt.json"), receipt);
   if (!candidates) {
     candidates = join(work, "candidates");

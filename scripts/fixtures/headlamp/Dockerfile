@@ -7,8 +7,10 @@ COPY --from=headlamp /headlamp/headlamp-server /headlamp/headlamp-server
 COPY --from=headlamp /headlamp/frontend /headlamp/frontend
 
 WORKDIR /workspace/scripts/fixtures/headlamp
-COPY package.json package-lock.json ./
+# Direct dependencies are pinned in package.json. Transitive dependencies are
+# resolved at build time, and qualify.mjs saves the resolved lockfile.
+COPY package.json ./
 RUN --mount=type=secret,id=npmrc,target=/root/.npmrc,required=false \
-    npm ci --ignore-scripts --no-audit --no-fund
+    npm install --ignore-scripts --no-audit --no-fund
 COPY . .
 WORKDIR /workspace

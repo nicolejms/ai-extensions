@@ -52,7 +52,7 @@ jobs:
             --tag radius-canvas-visual:playwright-1.62.1-node-24.19.0 \
             --file packages/adapter-canvas/test/visual/Dockerfile .
 
-      - name: Provision official Headlamp and locked published plugin tooling
+      - name: Provision official Headlamp and pinned published plugin tooling
         run: |
           docker build \
             --tag radius-headlamp-qualification:0.45.0 \
