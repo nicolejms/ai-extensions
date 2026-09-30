@@ -32,6 +32,8 @@ Potential consumers include the Copilot Canvas extension, Aspire, and the Radius
 
 Client page composition, authentication, transport, resource retrieval, and workflow orchestration remain host responsibilities. This design adds no backend service, iframe, generic Radius API client, or modeling/deployment capability. It does not require clients to adopt identical branding, page dimensions, or a new React major.
 
+This design does not change the Radius application graph JSON schema, `rad app graph` output, or any control-plane (UCP) API. Clients continue to retrieve graph data through their existing calls; the libraries only normalize and render what those calls already return. The deployed graph is handled as a `live` graph: the host retrieves it from UCP (for example, the same response `rad app graph` uses), and live normalization maps it into the common view model without adding modeled metadata, diff hashes, or workflow status. Canvas's `deployed-projection` remains a separate variant that describes workflow status over modeled topology, so the libraries never present a projection as live inventory or vice versa. If a future control-plane change alters the graph schema, it is versioned in Radius and absorbed by core's live normalization rather than by each client.
+
 ### User scenarios (optional)
 
 #### User story 1
@@ -73,6 +75,15 @@ flowchart TD
     Aspire -. npm .-> Core
 ```
 
+The repository-level dependencies are one-directional. The Dashboard depends on both `radius` (graph API and schema) and `ai-extensions` (graph libraries); `ai-extensions` depends on `radius` for the graph contract. Neither `radius` nor `ai-extensions` depends on the Dashboard.
+
+```mermaid
+flowchart LR
+    Dashboard["radius-project/dashboard"] --> Radius["radius-project/radius: graph API and schema"]
+    Dashboard --> AIExt["radius-project/ai-extensions: core and graph-react"]
+    AIExt --> Radius
+```
+
 ### Detailed design
 
 #### Option 1: Common contracts and renderer in ai-extensions
@@ -97,7 +108,7 @@ Duplicates layout, styling, details, and bug fixes; fails the requirement to min
 
 #### Proposed option
 
-Choose Option 1. Extract reusable behavior from the existing Canvas implementation, replace its callers, and delete superseded behavior. Subsequent clients use the same renderer with explicit capabilities rather than forks. Temporary compatibility modules may only forward exports. Review attribution and licensing before transferring source from another package.
+Choose Option 1 with a hybrid split between rendering and styling. The common library owns the primitives: normalization, Dagre layout, React Flow nodes and edges, details pane, legends, keyboard and focus behavior, and the geometry stylesheet (`base.css`). Each client owns its styling, either by keeping the default skin (`styles.css`) and overriding `--radius-graph-*` tokens, or by selecting `appearance="custom"` and supplying its own stylesheet against stable `data-radius-part` hooks. This keeps the separation of rendering and styling that Option 2 aims for without duplicating renderers. Extract reusable behavior from the existing Canvas implementation, replace its callers, and delete superseded behavior. Subsequent clients use the same renderer with explicit capabilities rather than forks. Temporary compatibility modules may only forward exports. Review attribution and licensing before transferring source from another package.
 
 ### API design (if applicable)
 
@@ -114,6 +125,24 @@ Own resource-ID parsing, graph variants, and deterministic, non-mutating live no
 #### Common React package - packages/graph-react
 
 Own one Dagre implementation with per-instance state, React Flow nodes/edges, React-controlled details, legends, and styles. Accept host capabilities rather than fetching data. Preserve focus, viewport, and open details across unrelated host renders. Fill the host container; expose `.radius-graph` and `.radius-graph__viewport` as documented layout hooks. Scope custom CSS and preserve vendor control geometry.
+
+#### Styling customization and host conflicts
+
+The shared "core" is the non-visual contract in `packages/core` plus the rendering primitives and geometry in `packages/graph-react`. Layout is shared by construction: every host runs the same Dagre engine with the same fixed 220px node width. Styling is shared only as a default: the default skin can be kept, re-tokenized, or replaced per graph instance.
+
+Hosts customize styling at three levels, from least to most effort:
+
+1. Pass `theme` values (background, text, muted, accent, font, color scheme), for example derived from the host's MUI `useTheme()`.
+2. Keep `styles.css` and override public `--radius-graph-*` CSS custom properties on the graph root.
+3. Import only `base.css`, set `appearance="custom"`, and style the documented `data-radius-part` hooks and supported vendor hooks from a host stylesheet.
+
+Backstage (and Headlamp) use MUI with a global `CssBaseline` and their own theme. The library is designed not to conflict with them:
+
+- All Radius and React Flow rules are wrapped in `@scope (.radius-graph …)`, so they cannot restyle Backstage components or another React Flow instance on the page; vendor keyframe names are prefixed.
+- The library has no MUI or emotion/JSS dependency, injects no global selectors, and does not require a `ThemeProvider`; hosts map their theme into tokens instead.
+- Custom appearance is per instance, so a Backstage plugin can use its own skin even if another graph on the page uses the default.
+
+Residual risks are inbound rather than outbound. This is not Shadow DOM isolation, so host resets (for example `CssBaseline` typography or `box-sizing`) can still inherit into the graph; `base.css` resets `box-sizing` and the geometry it depends on. `@scope` requires Chromium/Edge 118+, Safari 17.4+, or Firefox 146+, and older browsers render the graph unstyled. The Backstage plugin must run the same host qualification as Headlamp: load order before and after host CSS, unchanged computed styles on sampled host elements, and a missing-stylesheet negative control.
 
 #### Canvas adapter - packages/adapter-canvas
 
