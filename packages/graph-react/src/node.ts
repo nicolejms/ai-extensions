@@ -5,9 +5,9 @@ import {
   useLayoutEffect,
   useRef
 } from "react";
-import { Handle, Position } from "reactflow";
+import { Handle, Position } from "@xyflow/react";
 import type { CSSProperties, ReactElement, ReactNode, MouseEvent } from "react";
-import type { NodeProps } from "reactflow";
+import type { Node, NodeProps } from "@xyflow/react";
 import { isLocalSourceNode } from "./build.js";
 import { safeExternalUrl } from "./external-url.js";
 import { browserCssMaskUrl } from "./html.js";
@@ -42,7 +42,11 @@ export function fitTypeLabel(element: MeasuredElement): number {
   return size;
 }
 
-export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
+export type ResourceFlowNode = Node<GraphNodeData, "rad">;
+
+export function ResourceNode({
+  data
+}: NodeProps<ResourceFlowNode>): ReactElement {
   const interaction = useContext(NodeInteractionContext);
   if (!interaction)
     throw new Error("ResourceNode must be rendered inside RadiusGraph.");

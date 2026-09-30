@@ -104,7 +104,9 @@ export interface GraphSettings {
   readonly enablePopup: boolean;
 }
 
-export interface GraphNodeData {
+// A type alias rather than an interface: React Flow v12 requires node data to
+// be assignable to Record<string, unknown>, which interfaces are not.
+export type GraphNodeData = {
   id: string;
   borderColor: string;
   borderWidth: number;
@@ -132,7 +134,7 @@ export interface GraphNodeData {
   cloudId?: string;
   cloudResources: string;
   provisioningState?: string;
-}
+};
 
 export interface GraphNodePosition {
   x: number;

@@ -178,7 +178,7 @@ Shared code receives data and callbacks, not credentials or arbitrary backend UR
 
 ## Compatibility (optional)
 
-Support React 18 and React 19 through peer dependencies and matching runtime/type checks, without forcing a host upgrade. The initial target ranges are `^18.3.1 || ^19.2.8`; widening them requires evidence from the added versions. Retain React Flow 11 unless evidence requires migration. Maintain a supported client/compiler/React matrix and qualify public declarations as well as runtime behavior. Host-specific features remain optional capabilities, not required properties of every graph.
+Support React 18 and React 19 through peer dependencies and matching runtime/type checks, without forcing a host upgrade. The initial target ranges are `^18.3.1 || ^19.2.8`; widening them requires evidence from the added versions. Render with React Flow 12 (`@xyflow/react`), matching the Canvas migration and the Flow 12 hosts such as Headlamp. Maintain a supported client/compiler/React matrix and qualify public declarations as well as runtime behavior. Host-specific features remain optional capabilities, not required properties of every graph.
 
 ## Monitoring and logging
 

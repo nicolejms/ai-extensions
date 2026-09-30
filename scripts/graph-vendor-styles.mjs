@@ -38,7 +38,7 @@ export function renameKeyframes(css, from, to) {
 export function scopeFlowStyles(css, license) {
   assert.doesNotMatch(css, /@(?:import|font-face)\b/);
   return `/*!
-Generated from reactflow@11.11.4 by scripts/graph-vendor-styles.mjs.
+Generated from @xyflow/react@12.11.6 by scripts/graph-vendor-styles.mjs.
 Do not edit: regenerate after reviewing a vendor update.
 
 ${license.trim()}
@@ -53,10 +53,10 @@ export function expectedScopedFlowStyles() {
   const fromGraph = createRequire(
     join(repoRoot, "packages", "graph-react", "package.json")
   );
-  const cssPath = fromGraph.resolve("reactflow/dist/style.css");
+  const cssPath = fromGraph.resolve("@xyflow/react/dist/style.css");
   const root = resolve(dirname(cssPath), "..");
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-  assert.equal(manifest.version, "11.11.4");
+  assert.equal(manifest.version, "12.11.6");
   return scopeFlowStyles(
     readFileSync(cssPath, "utf8"),
     readFileSync(join(root, "LICENSE"), "utf8")

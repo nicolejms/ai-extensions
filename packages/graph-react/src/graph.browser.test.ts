@@ -5,7 +5,7 @@
 
 import { describe, it, expect, afterEach, vi } from "vitest";
 import dagre from "dagre";
-import { page, userEvent as browserUserEvent } from "vitest/browser";
+import { page } from "vitest/browser";
 import { screen, waitFor, within } from "@testing-library/dom";
 import userEvent from "@testing-library/user-event";
 import { createElement as h, useState } from "react";
@@ -1032,6 +1032,36 @@ function maximumChannelDelta(left: string, right: string): number {
   );
 }
 
+async function dragBy(
+  element: HTMLElement,
+  dx: number,
+  dy: number
+): Promise<void> {
+  const box = element.getBoundingClientRect();
+  const x = box.left + 5;
+  const y = box.top + 5;
+  const init = (clientX: number, clientY: number): MouseEventInit => ({
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX,
+    clientY,
+    button: 0,
+    buttons: 1
+  });
+  element.dispatchEvent(new MouseEvent("mousedown", init(x, y)));
+  for (let step = 1; step <= 5; step++) {
+    window.dispatchEvent(
+      new MouseEvent(
+        "mousemove",
+        init(x + (dx * step) / 5, y + (dy * step) / 5)
+      )
+    );
+    await new Promise(requestAnimationFrame);
+  }
+  window.dispatchEvent(new MouseEvent("mouseup", init(x + dx, y + dy)));
+}
+
 async function waitForStableTransform(viewport: HTMLElement): Promise<string> {
   let previous = "";
   let stableChecks = 0;
@@ -1582,7 +1612,7 @@ describe("graph view in a real browser", () => {
   it("keeps the graph draggable and selectable without connectable handles or nested keyboard targets", async () => {
     const { host } = mount();
     const web = await card("web");
-    const db = await card("db");
+    await card("db");
     const viewport = host.querySelector<HTMLElement>(".react-flow__viewport");
     if (!viewport) throw new Error("missing graph viewport");
     await waitForStableTransform(viewport);
@@ -1593,8 +1623,8 @@ describe("graph view in a real browser", () => {
     expect(edge).not.toBeNull();
     expect(edge?.hasAttribute("tabindex")).toBe(false);
     const path = edge?.querySelector("path");
-    expect(path?.getAttribute("marker-end")).toBe("url('#')");
-    expect(path?.getAttribute("marker-start")).toBe("url('#')");
+    expect(path?.hasAttribute("marker-end")).toBe(false);
+    expect(path?.hasAttribute("marker-start")).toBe(false);
     expect(host.querySelector("marker")).toBeNull();
     expect(host.querySelector(".react-flow__minimap")).toBeNull();
     expect(host.querySelector(".react-flow__attribution")).toBeNull();
@@ -1621,7 +1651,9 @@ describe("graph view in a real browser", () => {
     expect(Number(pattern?.getAttribute("width")) / zoom).toBeCloseTo(16);
 
     const before = wrapper?.style.transform;
-    await browserUserEvent.dragAndDrop(web, db);
+    // React Flow 12 spends the first move past its drag threshold starting the
+    // drag, so a single-step drop never moves the node. Drag in real steps.
+    await dragBy(web, 100, 50);
     await waitFor(() => expect(wrapper?.style.transform).not.toBe(before));
     expect(wrapper?.classList.contains("selected")).toBe(true);
     expect(host.querySelectorAll(".react-flow__edge")).toHaveLength(1);
@@ -1642,8 +1674,8 @@ describe("graph view in a real browser", () => {
       expect(box.bottom).toBeLessThan(hostBox.bottom);
     }
     for (const [name, expected] of [
-      ["zoom out", 0.2],
-      ["zoom in", 2]
+      ["Zoom Out", 0.2],
+      ["Zoom In", 2]
     ] as const) {
       const control = within(host).getByRole<HTMLButtonElement>("button", {
         name
@@ -1991,30 +2023,24 @@ describe("graph view in a real browser", () => {
     if (!viewport) throw new Error("missing graph viewport");
     await waitForStableTransform(viewport);
     await userEvent.click(
-      within(host).getByRole("button", { name: "zoom out" })
+      within(host).getByRole("button", { name: "Zoom Out" })
     );
     const zoomed = await waitForStableTransform(viewport);
-    const timer = vi.spyOn(window, "setTimeout");
-    try {
-      expect(
-        graph.update(
-          [...RESOURCES].reverse().map((resource) => ({
-            ...resource,
-            deployStatus: "failed"
-          }))
-        )
-      ).toBe(true);
-      await within(host).findAllByAltText("Failed");
-      expect(await waitForStableTransform(viewport)).toBe(zoomed);
-      expect(timer.mock.calls.filter(([, delay]) => delay === 40)).toEqual([]);
-      const ids = Array.from(host.querySelectorAll(".rad-node"), (node) =>
-        node.getAttribute("data-node-id")
-      );
-      expect(ids).toEqual(["app/db", "app/web"]);
-      expect(host.querySelectorAll(".react-flow__edge")).toHaveLength(1);
-    } finally {
-      timer.mockRestore();
-    }
+    expect(
+      graph.update(
+        [...RESOURCES].reverse().map((resource) => ({
+          ...resource,
+          deployStatus: "failed"
+        }))
+      )
+    ).toBe(true);
+    await within(host).findAllByAltText("Failed");
+    expect(await waitForStableTransform(viewport)).toBe(zoomed);
+    const ids = Array.from(host.querySelectorAll(".rad-node"), (node) =>
+      node.getAttribute("data-node-id")
+    );
+    expect(ids).toEqual(["app/db", "app/web"]);
+    expect(host.querySelectorAll(".react-flow__edge")).toHaveLength(1);
   });
 
   it("re-fits a zoomed viewport when the update changes which nodes exist", async () => {
@@ -2048,20 +2074,28 @@ describe("graph view in a real browser", () => {
     expect(graph.update(next.resources)).toBe(true);
 
     await card("api");
+    // React Flow 12 queues the fit until the new cards are measured, so wait
+    // for the outcome rather than a timer: every new card inside the frame.
+    await waitFor(() => {
+      const frame = host.getBoundingClientRect();
+      const cards = host.querySelectorAll(".rad-node");
+      expect(cards).toHaveLength(2);
+      for (const node of cards) {
+        const box = node.getBoundingClientRect();
+        expect(box.left).toBeGreaterThanOrEqual(frame.left);
+        expect(box.right).toBeLessThanOrEqual(frame.right);
+        expect(box.top).toBeGreaterThanOrEqual(frame.top);
+        expect(box.bottom).toBeLessThanOrEqual(frame.bottom);
+      }
+    });
     expect(await waitForStableTransform(viewport)).not.toBe(zoomedTransform);
     await userEvent.click(zoomOut);
     const refittedThenZoomed = await waitForStableTransform(viewport);
-    const timer = vi.spyOn(window, "setTimeout");
-    try {
-      expect(graph.update(next.resources)).toBe(true);
-      expect(await waitForStableTransform(viewport)).toBe(refittedThenZoomed);
-      expect(timer.mock.calls.filter(([, delay]) => delay === 40)).toEqual([]);
-    } finally {
-      timer.mockRestore();
-    }
+    expect(graph.update(next.resources)).toBe(true);
+    expect(await waitForStableTransform(viewport)).toBe(refittedThenZoomed);
   });
 
-  it("accepts an update before the first render and cancels a pending fit on teardown", async () => {
+  it("accepts an update before the first render and tears down mid-refit", async () => {
     const { graph, host } = mount();
     expect(graph.update([{ id: "latest", name: "latest" }])).toBe(true);
     await card("latest");
@@ -2069,32 +2103,17 @@ describe("graph view in a real browser", () => {
     const viewport = host.querySelector<HTMLElement>(".react-flow__viewport");
     if (!viewport) throw new Error("missing graph viewport");
     await waitForStableTransform(viewport);
-    // Freeze only timeouts after real layout has settled. React and the DOM
-    // still commit normally, but the pending fit cannot beat teardown.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const timer = vi.spyOn(window, "setTimeout");
-    const clear = vi.spyOn(window, "clearTimeout");
-    try {
-      expect(graph.update([{ id: "replacement", name: "replacement" }])).toBe(
-        true
-      );
-      await waitFor(() =>
-        expect(timer.mock.calls.some(([, delay]) => delay === 40)).toBe(true)
-      );
-      const index = timer.mock.calls.findIndex(([, delay]) => delay === 40);
-      expect(index).toBeGreaterThanOrEqual(0);
-      const pending = timer.mock.results[index].value;
-      graph.unmount();
-      expect(clear).toHaveBeenCalledWith(pending);
-      expect(host.textContent).toBe("");
-      expect(host.querySelector("[data-radius-details]")).toBeNull();
-      expect(graph.update(RESOURCES)).toBe(false);
-      expect(() => graph.unmount()).not.toThrow();
-    } finally {
-      timer.mockRestore();
-      clear.mockRestore();
-      vi.useRealTimers();
-    }
+    // A changed node set queues a fit; tearing down before React Flow applies
+    // it must not throw or leave the graph behind.
+    expect(graph.update([{ id: "replacement", name: "replacement" }])).toBe(
+      true
+    );
+    await card("replacement");
+    graph.unmount();
+    expect(host.textContent).toBe("");
+    expect(host.querySelector("[data-radius-details]")).toBeNull();
+    expect(graph.update(RESOURCES)).toBe(false);
+    expect(() => graph.unmount()).not.toThrow();
   });
 
   it("detaches the real root on unmount and stops answering updates", async () => {

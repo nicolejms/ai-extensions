@@ -54,7 +54,7 @@ export function validateLibraryManifest(manifest, name, coreVersion) {
   if (name === "@radius-project/graph-react") {
     assert.equal(manifest.dependencies["@radius-project/core"], coreVersion);
     assert.equal(manifest.dependencies.dagre, undefined);
-    assert.equal(manifest.dependencies.reactflow, "11.11.4");
+    assert.equal(manifest.dependencies["@xyflow/react"], "12.11.6");
     assert.equal(manifest.dependencies.react, undefined);
     assert.equal(manifest.dependencies["react-dom"], undefined);
     assert.deepEqual(manifest.peerDependencies, {
@@ -72,7 +72,7 @@ export function libraryExternalImports(directory) {
     : [
         "react",
         "react-dom/client",
-        "reactflow",
+        "@xyflow/react",
         "@radius-project/core/graph",
         "@radius-project/core/domain"
       ];

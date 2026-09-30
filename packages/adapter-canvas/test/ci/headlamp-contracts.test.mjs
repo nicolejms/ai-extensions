@@ -142,7 +142,7 @@ describe("real Headlamp qualification contracts", () => {
       throw new Error(`Cannot find module '${name}'`);
     };
     expect(() =>
-      validateBundledLayout(missing, { reactflow: "11.11.4" })
+      validateBundledLayout(missing, { "@xyflow/react": "12.11.6" })
     ).not.toThrow();
     expect(() => validateBundledLayout(missing)).not.toThrow();
   });

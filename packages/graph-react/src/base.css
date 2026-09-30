@@ -98,6 +98,16 @@
   opacity: 0;
   pointer-events: none;
 }
+/* React Flow v12 centres handles on the card border; v11 set them 4px outside
+   it, which leaves the established gap between an edge and its cards. */
+.radius-graph .react-flow__handle.rad-handle.react-flow__handle-top {
+  top: -4px;
+  transform: translate(-50%, 0);
+}
+.radius-graph .react-flow__handle.rad-handle.react-flow__handle-bottom {
+  bottom: -4px;
+  transform: translate(-50%, 0);
+}
 .radius-graph [data-radius-part="details"] {
   position: absolute;
   z-index: 1000;

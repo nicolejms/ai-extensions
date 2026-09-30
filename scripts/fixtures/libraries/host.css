@@ -99,6 +99,6 @@
   stroke-dasharray: 7px 3px;
 }
 
-.packed-custom .react-flow__background circle {
-  fill: rgb(30, 90, 150);
+.packed-custom .react-flow {
+  --xy-background-pattern-color: rgb(30, 90, 150);
 }

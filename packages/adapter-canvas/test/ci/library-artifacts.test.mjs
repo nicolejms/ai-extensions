@@ -49,7 +49,7 @@ function manifest() {
     },
     dependencies: {
       "@radius-project/core": "0.1.0",
-      reactflow: "11.11.4"
+      "@xyflow/react": "12.11.6"
     },
     peerDependencies: {
       react: "^18.3.1 || ^19.2.8",
@@ -64,7 +64,7 @@ describe("packed library contracts", () => {
     const css = readFileSync(scopedFlowStylesPath, "utf8");
     expect(css).toBe(expectedScopedFlowStyles());
     expect(css).toContain("MIT License");
-    expect(css).toContain("Copyright (c) 2019-2023 webkid GmbH");
+    expect(css).toContain("Copyright (c) 2019-2025 webkid GmbH");
     expect(css).toContain("@scope (.radius-graph)");
     expect(css).toContain("@keyframes radius-graph-dashdraw");
     expect(css).not.toMatch(/@(?:-webkit-)?keyframes dashdraw/);
@@ -118,7 +118,7 @@ describe("packed library contracts", () => {
   it("rejects accidentally bundling the unscoped vendor stylesheet", () => {
     expect(() =>
       validateStylesheetBoundary({
-        inputs: { "../../node_modules/reactflow/dist/style.css": {} },
+        inputs: { "../../node_modules/@xyflow/react/dist/style.css": {} },
         outputs: {}
       })
     ).toThrow("Unexpected stylesheet input");

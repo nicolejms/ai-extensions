@@ -8,15 +8,16 @@ import {
   useRef,
   useState
 } from "react";
-import ReactFlow, {
+import {
   Background,
   Controls,
+  ReactFlow,
   useEdgesState,
   useNodesState
-} from "reactflow";
+} from "@xyflow/react";
 import dagre from "dagre";
 import type { KeyboardEvent, MouseEvent, ReactElement, ReactNode } from "react";
-import type { ReactFlowInstance } from "reactflow";
+import type { ReactFlowInstance } from "@xyflow/react";
 import type {
   GraphResource,
   RadiusGraphData
@@ -32,6 +33,7 @@ import {
 } from "./details.js";
 import type { FocusTarget } from "./details.js";
 import { DetailsOverlay } from "./details-panel.js";
+import { requestFit } from "./fit.js";
 import { layoutGraph } from "./layout.js";
 import {
   buildCategoryLegendHtml,
@@ -39,9 +41,10 @@ import {
   collectLegendCategories
 } from "./legend.js";
 import { NodeInteractionContext, ResourceNode } from "./node.js";
+import type { ResourceFlowNode } from "./node.js";
 import type { GraphCallbacks } from "./callbacks.js";
 import { graphStyle, styledEdges } from "./theme.js";
-import type { GraphStyle, GraphTheme } from "./theme.js";
+import type { GraphStyle, GraphTheme, StyledEdge } from "./theme.js";
 export type { GraphStyle, GraphTheme } from "./theme.js";
 
 export interface RadiusGraphProps {
@@ -63,6 +66,13 @@ const EMPTY_CALLBACKS: GraphCallbacks = {};
 const EMPTY_OPTIONS = {};
 const NODE_TYPES = { rad: ResourceNode };
 const FIT_OPTIONS = { padding: 0.18 };
+// React Flow v12 anchors each dot half a gap from the pattern origin; v11
+// anchored it half a dot. This offset keeps the established grid position.
+const GRID_GAP = 16;
+const GRID_DOT_SIZE = 1;
+const GRID_DOT_OFFSET = (GRID_DOT_SIZE - GRID_GAP) / 2;
+// createElement cannot infer React Flow's node and edge generics, so bind them.
+const ResourceFlow = ReactFlow<ResourceFlowNode, StyledEdge>;
 // Only these callbacks cross a memoized boundary, so only these need a stable
 // facade. `onSelect` and `onDetails` fire through a ref, and `onRetry` is read
 // from props by the error boundary, so all three stay current on their own.
@@ -110,11 +120,16 @@ function GraphContent({
     const warning = layoutGraph(dagre, result.nodes, result.edges);
     return { ...result, edges: styledEdges(result.edges), warning };
   }, [graph, settings]);
-  const [nodes, setNodes, onNodesChange] = useNodesState<GraphNodeData>(
+  const [nodes, setNodes, onNodesChange] = useNodesState<ResourceFlowNode>(
     built.nodes
   );
-  const [edges, setEdges, onEdgesChange] = useEdgesState(built.edges);
-  const flowRef = useRef<ReactFlowInstance | null>(null);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<StyledEdge>(
+    built.edges
+  );
+  const flowRef = useRef<ReactFlowInstance<
+    ResourceFlowNode,
+    StyledEdge
+  > | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const panelId = useId();
   // Which node's details are open, the card they are anchored to, and where
@@ -154,21 +169,7 @@ function GraphContent({
     built.nodes.map((node) => node.id).sort()
   ]);
   const previousSignature = useRef(signature);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const scheduleFit = useCallback(() => {
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      timerRef.current = null;
-      flowRef.current?.fitView(FIT_OPTIONS);
-    }, 40);
-  }, []);
-  useEffect(
-    () => () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
-    },
-    []
-  );
+  const refitRef = useRef(false);
   const applyDetails = useCallback((next: OpenDetails | null) => {
     detailsRef.current = next;
     setDetails(next);
@@ -192,10 +193,21 @@ function GraphContent({
     if (open && !built.dataById[open.id]) closeDetails();
     if (signature !== previousSignature.current) {
       previousSignature.current = signature;
-      scheduleFit();
+      refitRef.current = true;
       closeDetails();
     }
-  }, [built, signature, scheduleFit, setNodes, setEdges, closeDetails]);
+  }, [built, signature, setNodes, setEdges, closeDetails]);
+
+  // React Flow copies the nodes prop into its store from its own passive
+  // effect, which runs before this parent effect. Asking for the fit here lets
+  // v12 queue it against the new nodes and apply it once they are measured;
+  // asked earlier, it could frame the previous graph. The initial fit comes
+  // from the fitView prop.
+  useEffect(() => {
+    if (!refitRef.current) return;
+    refitRef.current = false;
+    requestFit(flowRef.current, FIT_OPTIONS);
+  }, [nodes]);
 
   // Re-anchor an open panel once the cards it points at have been laid out
   // again, so a relayout or a drag does not leave it behind.
@@ -318,7 +330,7 @@ function GraphContent({
           "No resources in this application."
         )
       : h(
-          ReactFlow,
+          ResourceFlow,
           {
             nodes,
             edges,
@@ -335,12 +347,17 @@ function GraphContent({
             edgesFocusable: false,
             elementsSelectable: true,
             proOptions: { hideAttribution: true },
-            onInit: (instance: ReactFlowInstance) => {
+            onInit: (
+              instance: ReactFlowInstance<ResourceFlowNode, StyledEdge>
+            ) => {
               flowRef.current = instance;
-              scheduleFit();
             }
           },
-          h(Background, { gap: 16, size: 1 }),
+          h(Background, {
+            gap: GRID_GAP,
+            size: GRID_DOT_SIZE,
+            offset: GRID_DOT_OFFSET
+          }),
           h(Controls, { showInteractive: false })
         ),
       enablePopup && built.nodes.length > 0 ?

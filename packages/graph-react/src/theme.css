@@ -220,13 +220,19 @@
     overflow: hidden;
   }
   :scope .react-flow__controls-button {
-    /* Preserve Flow's content-box sizing despite the scoped reset above. */
+    /* React Flow v11 sized control buttons as content-box with 5px padding;
+       v12 sets neither, so pin the established box despite the reset above. */
     box-sizing: content-box;
+    padding: 5px;
     background: var(--rad-surface);
     border-bottom: 1px solid var(--rad-stroke);
     color: var(--rad-text);
     width: 26px;
     height: 26px;
+  }
+  /* v12 also drops the last button's border, which v11 kept. */
+  :scope .react-flow__controls-button:last-child {
+    border-bottom: 1px solid var(--rad-stroke);
   }
   :scope .react-flow__controls-button:hover {
     background: var(--rad-bg-subtle);
@@ -234,11 +240,11 @@
   :scope .react-flow__controls-button svg {
     fill: currentColor;
   }
-  :scope .react-flow__background circle {
-    fill: var(--rad-grid);
-  }
-  :scope .react-flow__background path {
-    stroke: var(--rad-grid);
+  /* React Flow paints the dot grid from --xy-background-pattern-color. A var()
+     passed through the Background "color" prop would land in an SVG fill
+     attribute, where Chromium does not resolve it. */
+  :scope .react-flow {
+    --xy-background-pattern-color: var(--rad-grid);
   }
   :scope .radius-graph__edge .react-flow__edge-path {
     stroke: var(--radius-graph-edge-color, var(--rad-edge-default-stroke));

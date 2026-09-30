@@ -18,9 +18,12 @@ describe("type label fitting", () => {
           selected: false,
           dragging: false,
           isConnectable: false,
-          xPos: 0,
-          yPos: 0,
-          zIndex: 0
+          positionAbsoluteX: 0,
+          positionAbsoluteY: 0,
+          zIndex: 0,
+          draggable: false,
+          selectable: false,
+          deletable: false
         })
       )
     ).toThrow("inside RadiusGraph");

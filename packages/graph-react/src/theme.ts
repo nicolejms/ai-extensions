@@ -34,7 +34,7 @@ export function graphStyle(style?: GraphStyle, theme?: GraphTheme): GraphStyle {
   return result;
 }
 
-interface StyledEdge extends Omit<GraphEdge, "style"> {
+export interface StyledEdge extends Omit<GraphEdge, "style"> {
   className: string;
   style: CSSProperties;
 }
