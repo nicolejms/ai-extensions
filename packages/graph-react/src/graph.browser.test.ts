@@ -1502,6 +1502,45 @@ describe("graph view in a real browser", () => {
     ).not.toBe("none");
   });
 
+  it("dismisses card details when the same card is clicked again", async () => {
+    const { host, recorded } = mount();
+    await card("web");
+    const webCard = page.getByRole("group", { name: "web", exact: true });
+    const panel = () =>
+      host.querySelector<HTMLElement>("[data-radius-details]")?.style.display;
+
+    await webCard.click();
+    expect(panel()).not.toBe("none");
+    await webCard.click();
+    await waitFor(() => expect(panel()).toBe("none"));
+    // A third click re-opens, so the card keeps normal toggle behavior.
+    await webCard.click();
+    await waitFor(() => expect(panel()).not.toBe("none"));
+    expect(recorded.opened).toEqual(["app/web", "app/web", "app/web"]);
+  });
+
+  it("paints a monochrome icon through a themed mask", async () => {
+    mount({
+      resources: [
+        {
+          id: "app/models",
+          name: "models",
+          type: "Radius.Compute/containers",
+          icon: '<svg viewBox="0 0 8 8"><rect fill="currentColor" /></svg>'
+        }
+      ]
+    });
+    const models = await card("models");
+    const icon = models.querySelector<HTMLElement>(".rad-node__icon");
+    expect(icon?.tagName).toBe("SPAN");
+    expect(icon?.className).toBe("rad-node__icon rad-node__icon--themed");
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+    expect(icon?.style.maskImage).toMatch(/^url\("data:image\/svg\+xml/);
+    const styles = getComputedStyle(icon!);
+    expect(styles.width).toBe("40px");
+    expect(styles.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+  });
+
   it("fits the type label again when its resource type changes", async () => {
     const { graph } = mount({
       resources: [{ id: "web", name: "web", type: "Radius.Compute/containers" }]

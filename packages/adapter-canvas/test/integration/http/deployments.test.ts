@@ -29,7 +29,8 @@ import { createTestRouteTable } from "../../support/server/route-table.js";
 import type { CanvasServerContainer } from "../../../src/server/create-canvas-server.js";
 import type {
   DeployListCacheEntry,
-  DeploymentRow
+  DeploymentRow,
+  DeploymentsDependencies
 } from "../../../src/server/routes/deployments.js";
 import type {
   ArtifactFiles,
@@ -37,6 +38,14 @@ import type {
 } from "../../../src/deploy-artifacts.js";
 import type { DeployMonitorRequest } from "../../../src/server/services/deploy-monitor.js";
 import type { CanvasState } from "../../../src/shared.js";
+import { observeWorkflowRun } from "@radius-project/core";
+import {
+  readWorkflowRun,
+  readWorkflowLog,
+  type WorkflowExecution
+} from "@radius-project/adapter-shared";
+import { createDeployOutcomeService } from "../../../src/server/services/deploy-outcome.js";
+import { settleDeployStatuses } from "../../../src/deploy-artifacts.js";
 
 let container: CanvasServerContainer | undefined;
 
@@ -86,7 +95,14 @@ function row(environment: string, status = "deployed"): DeploymentRow {
   };
 }
 
-function start(): Harness {
+function start(
+  callbacks: Partial<
+    Pick<
+      DeploymentsDependencies,
+      "triggerDeployRepairHandoff" | "triggerDeployFailureNotice"
+    >
+  > = {}
+): Harness {
   const state: CanvasState = {};
   const cache = new Map<string, DeployListCacheEntry>();
   const environments: string[] = [];
@@ -140,8 +156,10 @@ function start(): Harness {
     createDeploymentsRoutes({
       isValidRepoSlug,
       readInstanceEntry: () => (entryMissing ? undefined : { state }),
-      triggerDeployRepairHandoff: () => false,
-      triggerDeployFailureNotice: () => false,
+      triggerDeployRepairHandoff:
+        callbacks.triggerDeployRepairHandoff ?? (() => false),
+      triggerDeployFailureNotice:
+        callbacks.triggerDeployFailureNotice ?? (() => false),
       deployHandoffStatus: (current) => ({
         state: current.deployHandoffState || "idle",
         attempts: current.deployHandoffAttempts || 0,
@@ -262,6 +280,176 @@ function post(baseUrl: string, path: string, body: string): Promise<Response> {
 }
 
 describe("deployments routes real-loopback HIT (RF-05)", () => {
+  it("exposes complete real workflow failure evidence to repair polling but keeps notifications passive", async () => {
+    const calls: string[] = [];
+    const harness = start({
+      triggerDeployRepairHandoff: (entry) => {
+        expect(entry?.state.deployError).toContain(
+          "Error: recipe quota exceeded"
+        );
+        expect(entry?.state.deployingResources?.[0].deployStatus).toBe(
+          "failed"
+        );
+        calls.push("repair");
+        return false;
+      },
+      triggerDeployFailureNotice: () => {
+        calls.push("notice");
+        return false;
+      }
+    });
+    const execution: WorkflowExecution = {
+      mode: "ambient",
+      run: async (args) => {
+        calls.push(args.join(" "));
+        if (
+          args.join(" ") ===
+          "run view 42 --json status,conclusion,jobs --repo org/app"
+        ) {
+          return {
+            code: 0,
+            stderr: "",
+            stdout:
+              '{"status":"completed","conclusion":"failure","jobs":[{"steps":[{"name":"Run rad commands","conclusion":"failure"}]}]}'
+          };
+        }
+        if (args.join(" ") === "run view 42 --log --repo org/app") {
+          return {
+            code: 0,
+            stderr: "",
+            stdout: "Error: recipe quota exceeded"
+          };
+        }
+        throw new Error("Unexpected workflow read");
+      }
+    };
+    const observed = await observeWorkflowRun(
+      { repo: "org/app", runId: 42 },
+      {
+        readRun: (repo, runId) => readWorkflowRun(execution, repo, runId)
+      }
+    );
+    if (!observed) throw new Error("Expected observed run");
+    harness.state.deployStatus = "in_progress";
+    harness.state.deployingResources = [
+      { name: "db", deployStatus: "pending" }
+    ];
+    const outcome = createDeployOutcomeService({
+      projectSafeGraphResources: () => [],
+      settleDeployStatuses,
+      fetchRunLog: (repo, runId) => readWorkflowLog(execution, repo, runId),
+      cloudAuthDriftKind: "cloud-auth-drift",
+      sleep: () => {
+        throw new Error("No graph retry expected");
+      },
+      now: () => 1700000060000
+    });
+    await outcome.settle({
+      entry: { state: harness.state },
+      repo: "org/app",
+      runId: 42,
+      provider: "azure",
+      resources: harness.state.deployingResources,
+      conclusion: observed.conclusion,
+      steps: observed.steps,
+      statusReader: {
+        graph: async () => {
+          calls.push("graph");
+          return { graph: [], status: "ok" };
+        },
+        controlPlaneLog: async () => {
+          calls.push("control-plane");
+          return null;
+        }
+      },
+      deployStepStartedAt: 0,
+      log: () => {},
+      setStatus: (resource, status) => {
+        resource.deployStatus = status;
+      },
+      pollDeployStatus: async (force) => {
+        expect(force).toBe(true);
+        calls.push("progress");
+      }
+    });
+    const entry = await container!.getOrCreate("panel-a");
+    const notification = await fetch(
+      `${entry.baseUrl}/api/deploy-notification`
+    );
+    expect(notification.status).toBe(200);
+    expect(calls).not.toContain("repair");
+    const status = await fetch(`${entry.baseUrl}/api/deploy-status`);
+    expect(await status.json()).toMatchObject({
+      status: "failed",
+      resources: [
+        expect.objectContaining({
+          name: "db",
+          deployStatus: "failed",
+          deployMessage: "Error: recipe quota exceeded"
+        })
+      ],
+      error: expect.stringContaining("Error: recipe quota exceeded")
+    });
+    expect(calls).toEqual([
+      "run view 42 --json status,conclusion,jobs --repo org/app",
+      "graph",
+      "progress",
+      "run view 42 --log --repo org/app",
+      "control-plane",
+      "repair",
+      "notice"
+    ]);
+    expect(harness.dispatches).toEqual([]);
+  });
+
+  it("preserves terminal attempt status and passes the socket instance to status callbacks", async () => {
+    const calls: Array<{
+      callback: string;
+      instanceId: string;
+      state: CanvasState | undefined;
+    }> = [];
+    const harness = start({
+      triggerDeployRepairHandoff: (entry, instanceId) => {
+        calls.push({ callback: "repair", instanceId, state: entry?.state });
+        return false;
+      },
+      triggerDeployFailureNotice: (entry, instanceId) => {
+        calls.push({ callback: "notice", instanceId, state: entry?.state });
+        return false;
+      }
+    });
+    Object.assign(harness.state, {
+      deployStatus: "complete",
+      deployAttempt: { id: "attempt-42" },
+      deployRunUrl: "https://github.com/acme/widgets/actions/runs/42",
+      deployStartedAt: 1700000000000,
+      deployFinishedAt: 1700000060000
+    });
+    const entry = await container!.getOrCreate("panel-a");
+
+    const response = await fetch(`${entry.baseUrl}/api/deploy-status`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(await response.json()).toMatchObject({
+      status: "complete",
+      attempt: { id: "attempt-42" },
+      deployRunUrl: "https://github.com/acme/widgets/actions/runs/42",
+      startedAt: 1700000000000,
+      finishedAt: 1700000060000,
+      active: false,
+      repairing: false
+    });
+    expect(
+      calls.map(({ callback, instanceId }) => [callback, instanceId])
+    ).toEqual([
+      ["repair", "panel-a"],
+      ["notice", "panel-a"]
+    ]);
+    expect(calls.every(({ state }) => state === harness.state)).toBe(true);
+    expect(harness.dispatches).toEqual([]);
+  });
+
   it("serves the deploy status poll and its incremental log form over a real socket", async () => {
     const harness = start();
     harness.state.deployLogs = ["a", "b", "c"];
@@ -284,8 +472,36 @@ describe("deployments routes real-loopback HIT (RF-05)", () => {
     expect(sinceBody).not.toHaveProperty("logs");
   });
 
-  it("serves the ambient deploy notification without the poll's payload or side effects", async () => {
+  it("does not expose unsafe deployed graph state over the real status endpoint", async () => {
     const harness = start();
+    const sentinel = "fixture-private-field";
+    harness.state.deployedGraph = [
+      {
+        id: "unsafe",
+        name: "unsafe",
+        type: "Radius.Security/secrets",
+        properties: { data: { privateField: sentinel } }
+      }
+    ];
+    const entry = await container!.getOrCreate("panel-a");
+
+    const response = await fetch(`${entry.baseUrl}/api/deploy-status`);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(JSON.parse(body).deployedGraph).toBeNull();
+    expect(body).not.toContain(sentinel);
+  });
+
+  it("serves the ambient deploy notification without the poll's payload or side effects", async () => {
+    const harness = start({
+      triggerDeployRepairHandoff: () => {
+        throw new Error("Notification must not trigger repair");
+      },
+      triggerDeployFailureNotice: () => {
+        throw new Error("Notification must not trigger a failure notice");
+      }
+    });
     harness.state.deployAttempt = {
       id: "attempt-3",
       targetRepo: "octo/todolist",

@@ -19,10 +19,13 @@ export {
   deployStatusKeys,
   filterGraphVisualizationResources,
   lookupDeployStatus,
+  mergeDeployedGraphDisplayMetadata,
   mergeDeployedGraphMetadata,
+  projectGraphOutputMetadata,
+  projectSafeApplicationGraph,
   projectDeployedGraph
 } from "./graph/index.js";
-export type { DeployStatus } from "./graph/index.js";
+export type { DeployStatus, SafeApplicationGraph } from "./graph/index.js";
 export {
   APP_ORIGIN_REPO_PATH,
   APP_ORIGIN_ROOT_PATH,
@@ -118,3 +121,25 @@ export type {
   DeleteWorkflowFiles
 } from "./workflows/index.js";
 export type { GitHub } from "./ports/index.js";
+export { observeWorkflowRun } from "./workflow-observation.js";
+export type {
+  WorkflowJob,
+  WorkflowRunDetail,
+  WorkflowRunRead,
+  WorkflowStep,
+  WorkflowTarget,
+  WorkflowObservationReads
+} from "./workflow-observation.js";
+export {
+  extractErrorLines,
+  extractGitHubActionsStepLog,
+  explainOidcEnterpriseClaim,
+  classifyDeployCloudAuthDrift,
+  extractRadDeployError,
+  collectWorkflowFailure
+} from "./workflow-diagnostics.js";
+export type {
+  DeployCloudAuthDriftInput,
+  WorkflowFailure,
+  WorkflowFailureReads
+} from "./workflow-diagnostics.js";

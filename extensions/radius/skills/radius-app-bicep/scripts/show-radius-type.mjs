@@ -17,6 +17,13 @@ import {
   managedBicepEnv,
   spawnRad
 } from "../../../../../packages/adapter-shared/src/rad-process.mjs";
+import {
+  isRadiusEdgeRelease,
+  isRadiusPullRequestRelease,
+  radiusEdgeAuthorizationError,
+  radiusCliIdentity,
+  radiusExtensionRefForRelease
+} from "../../../../../packages/adapter-shared/src/rad-release.ts";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
@@ -53,7 +60,6 @@ const GENERATED_ROOT =
   "https://raw.githubusercontent.com/radius-project/radius";
 const GENERATED_PATH = "hack/bicep-types-radius/generated";
 const RADIUS_DEFAULTS_PATH = "deploy/manifest/defaults.yaml";
-const AZURE_RECIPE_PACK_PATH = "recipe-packs/azure/aks-recipepack.bicep";
 const MANAGED_RECIPES_CACHE_PATH = "managed-recipes";
 // This exact SHA pattern is the safety boundary around the only recursive
 // removal below ~/.radius. Never broaden it to accept arbitrary directory names.
@@ -143,17 +149,17 @@ function parseArguments(args) {
   return { help: false, stagingDir, selectors };
 }
 
-export function deriveExtensionReference(version) {
-  const match =
-    /^v?(\d+)\.(\d+)\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/u.exec(
-      typeof version === "string" ? version.trim() : ""
-    );
-  if (match === null) {
+export function deriveExtensionReference(release) {
+  const extension = radiusExtensionRefForRelease(release);
+  if (extension !== null) return extension;
+  if (isRadiusPullRequestRelease(release)) {
     throw new Error(
-      `Unsupported Radius version "${version ?? ""}". Do not replace or modify the configured Radius CLI; report this error and stop modeling.`
+      `Radius release "${release}" is a pull-request build; no Radius Bicep types are published for pull-request releases. Do not replace or modify the configured Radius CLI; report this error and stop modeling.`
     );
   }
-  return `br:biceptypes.azurecr.io/radius:${match[1]}.${match[2]}`;
+  throw new Error(
+    `Unsupported Radius release "${release ?? ""}". Do not replace or modify the configured Radius CLI; report this error and stop modeling.`
+  );
 }
 
 export function parseRadiusIdentity(output) {
@@ -164,22 +170,22 @@ export function parseRadiusIdentity(output) {
     throw new Error("Managed Radius returned invalid version JSON.");
   }
   requireObject(parsed, "Managed Radius version JSON");
-  if (typeof parsed.version !== "string" || parsed.version.trim() === "") {
-    throw new Error('Managed Radius version JSON is missing "version".');
+  const { release, commit } = radiusCliIdentity(parsed);
+  if (release === null) {
+    throw new Error('Managed Radius version JSON is missing "release".');
   }
-  if (typeof parsed.commit !== "string" || parsed.commit.trim() === "") {
+  if (commit === null) {
     throw new Error('Managed Radius version JSON is missing "commit".');
   }
-  const version = parsed.version.trim();
-  const commit = parsed.commit.trim();
   if (!/^[0-9a-f]{40}$/iu.test(commit)) {
     throw new Error(
       `Managed Radius commit "${commit}" is not a full 40-character SHA.`
     );
   }
   return {
+    release,
     commit: commit.toLowerCase(),
-    extension: deriveExtensionReference(version)
+    extension: deriveExtensionReference(release)
   };
 }
 
@@ -412,11 +418,13 @@ async function queryManagedRadiusIdentity({
   env = process.env,
   home = os.homedir(),
   processTimeoutMs = 10_000,
-  runRadImpl = spawnRad
+  runRadImpl = spawnRad,
+  warn = console.error
 } = {}) {
   const binaries = managedBinaries(home);
+  const usesExecutableOverride = isExecutable(env.RADIUS_RAD_BINARY);
   const rad =
-    isExecutable(env.RADIUS_RAD_BINARY) ? env.RADIUS_RAD_BINARY : binaries.rad;
+    usesExecutableOverride ? path.resolve(env.RADIUS_RAD_BINARY) : binaries.rad;
   if (!isExecutable(rad)) {
     throw new Error(`Extension-managed Radius binary not found at "${rad}".`);
   }
@@ -430,7 +438,16 @@ async function queryManagedRadiusIdentity({
         label: "Managed Radius version query"
       }
     );
-    return parseRadiusIdentity(stdout);
+    const identity = parseRadiusIdentity(stdout);
+    if (isRadiusEdgeRelease(identity.release)) {
+      if (!usesExecutableOverride) {
+        throw new Error(radiusEdgeAuthorizationError(identity.extension));
+      }
+      warn(
+        `Warning: Radius release "edge" uses the mutable Radius Bicep extension "${identity.extension}", which may not match the configured Radius binary.`
+      );
+    }
+    return identity;
   } catch (error) {
     const detail = error?.stderr?.trim() || message(error);
     throw new Error(`Managed Radius version query failed: ${detail}`, {
@@ -520,7 +537,7 @@ async function fetchText(
       }
       if (!response.ok) {
         const error = new Error(
-          `Source request failed with HTTP ${response.status}.`
+          `Source request failed with HTTP ${response.status}.${response.status === 404 ? ` No source is published at "${url}".` : ""}`
         );
         error.noRetry = !(
           response.status === 408 ||
@@ -768,16 +785,17 @@ async function loadManagedAzureRecipePack(releaseCommit, options) {
     options
   );
   const { text: source } = await loadCachedText(
-    `${MANAGED_RECIPES_CACHE_PATH}/azure/${pin.commit}/aks-recipepack.json`,
+    `${MANAGED_RECIPES_CACHE_PATH}/${pin.name}/${pin.commit}/${path.posix.basename(pin.path, ".bicep")}.json`,
     releaseCommit,
-    `https://raw.githubusercontent.com/${pin.repository}/${pin.commit}/${AZURE_RECIPE_PACK_PATH}`,
+    `https://raw.githubusercontent.com/${pin.repository}/${pin.commit}/${pin.path}`,
     validateAzureRecipePack,
     options
   );
   return {
+    name: pin.name,
     repository: pin.repository,
     commit: pin.commit,
-    path: AZURE_RECIPE_PACK_PATH,
+    path: pin.path,
     source
   };
 }
@@ -883,7 +901,7 @@ export async function resolveRadiusTypes(selectors, options = {}) {
                 {
                   status: "notFound",
                   provenance: "managed-release-default",
-                  recipePack: "azure",
+                  recipePack: pack.name,
                   repository: pack.repository,
                   commit: pack.commit,
                   path: pack.path,
@@ -892,7 +910,7 @@ export async function resolveRadiusTypes(selectors, options = {}) {
               : {
                   status: "available",
                   provenance: "managed-release-default",
-                  recipePack: "azure",
+                  recipePack: pack.name,
                   repository: pack.repository,
                   commit: pack.commit,
                   path: pack.path,
@@ -903,7 +921,7 @@ export async function resolveRadiusTypes(selectors, options = {}) {
             resource.recipe = {
               status: "unavailable",
               provenance: "managed-release-default",
-              recipePack: "azure",
+              recipePack: pack.name,
               repository: pack.repository,
               commit: pack.commit,
               path: pack.path,

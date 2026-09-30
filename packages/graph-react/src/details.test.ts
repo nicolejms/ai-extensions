@@ -32,6 +32,7 @@ function node(overrides: Partial<GraphNodeData> = {}): GraphNodeData {
     icon: "",
     nodeName: "web",
     typeLabel: "Compute/containers",
+    concreteType: "",
     codeRef: "src/web.ts#L4",
     sourceUrl: "https://github.test/o/r/blob/main/src/web.ts#L4",
     sourceBranch: "main",
@@ -56,6 +57,54 @@ function settings(options: GraphOptions = {}) {
 }
 
 describe("detail rows", () => {
+  it("shows the selected concrete type as secondary detail, rendered as text", () => {
+    const rows = buildDetailRows(
+      settings(),
+      node({ concreteType: "Microsoft.Example/<unsafe>" })
+    );
+    expect(rows[0]).toEqual({
+      kind: "concrete",
+      type: "Microsoft.Example/<unsafe>"
+    });
+    const html = renderToStaticMarkup(
+      createElement(DetailsOverlay, {
+        id: "details",
+        open: true,
+        left: 0,
+        top: 0,
+        rows: [rows[0]!]
+      })
+    );
+    expect(html).toContain("Concrete type");
+    expect(html).toContain("Microsoft.Example/&lt;unsafe&gt;");
+    expect(html).not.toContain("Microsoft.Example/<unsafe>");
+  });
+
+  it("omits concrete type details when no resolved type is available", () => {
+    expect(buildDetailRows(settings(), node())[0]).toMatchObject({
+      label: "View source code"
+    });
+  });
+
+  it("leads a failure message before the concrete type", () => {
+    const rows = buildDetailRows(
+      settings(),
+      node({
+        concreteType: "Microsoft.Example/resources",
+        deployStatus: "failed",
+        deployMessage: "quota exceeded"
+      })
+    );
+    expect(rows[0]).toEqual({
+      kind: "message",
+      text: "quota exceeded",
+      failure: true
+    });
+    expect(rows[1]).toEqual({
+      kind: "concrete",
+      type: "Microsoft.Example/resources"
+    });
+  });
   it("renders inert and local labels as text and keeps an unlined local fallback", () => {
     const html = renderToStaticMarkup(
       createElement(DetailsOverlay, {

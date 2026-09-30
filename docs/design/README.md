@@ -12,6 +12,12 @@ Write one for larger changes, such as:
 
 You do **not** need a design doc for minor changes such as documentation updates, small bug fixes, or refactors with no behavioral change — use a GitHub issue and pull request instead.
 
+## Proposals
+
+- [GitHub Radius: Extracting a Reusable Library from Canvas](./2026-09-github-radius.md) proposes sharing existing application and environment coordination across frontends, including Canvas.
+- [GitHub Radius library: staged implementation plan](./2026-09-github-radius-implementation-plan.md) sequences that extraction into independently mergeable capabilities while preserving Canvas contracts and coordinating with concurrent work.
+- [GitHub Radius migration inventory](./2026-09-github-radius-migration-inventory.md) records current capability ownership, compatibility contracts, known gaps, and stage 0 characterization evidence.
+
 ## How to create one
 
 1. Copy [`template.md`](./template.md) to a new file named `YYYY-MM-short-name.md`, using the current year and month plus a short descriptive name — for example, `2026-07-control-plane-state-ghcr.md`.

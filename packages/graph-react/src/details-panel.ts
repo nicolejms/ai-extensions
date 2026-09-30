@@ -73,6 +73,13 @@ function renderRow(
         { key, "data-radius-part": "details-status" },
         `Provisioning status: ${row.state}`
       );
+    case "concrete":
+      return h(
+        "div",
+        { key, "data-radius-part": "details-concrete" },
+        h("div", { "data-radius-part": "details-label" }, "Concrete type"),
+        h("div", { "data-radius-part": "details-value" }, row.type)
+      );
     case "message":
       return h(
         "div",

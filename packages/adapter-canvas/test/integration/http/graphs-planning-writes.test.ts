@@ -1,6 +1,10 @@
 import { createServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { computeGraphDiff } from "@radius-project/core";
+import {
+  applicationGraphToResources,
+  computeGraphDiff,
+  projectSafeApplicationGraph
+} from "@radius-project/core";
 import { RadProcessError } from "@radius-project/adapter-shared";
 import { createCanvasServer } from "../../../src/server/create-canvas-server.js";
 import { createRequestHandler } from "../../../src/server/create-request-handler.js";
@@ -233,6 +237,50 @@ describe("graphs-planning writes real-loopback HIT", () => {
     );
     expect(harness.state.graphLoaded).toBe(true);
     expect(harness.state.graphTargetRepo).toBe("octo/app");
+  });
+
+  it("does not expose rejected icon entries in the modeled graph response", async () => {
+    const sentinel = "fixture-private-field";
+    const iconHash =
+      "1e8500bafa3c1523488304fe478d570e4f518b8347f42a0796abd560fa08c7e5";
+    const icon =
+      '<svg viewBox="0 0 8 8" fill="none" xmlns="http://www.w3.org/2000/svg"><mask id="resource-icon" maskUnits="userSpaceOnUse" x="0" y="0" width="8" height="8"><path d="M1 1h6v6H1z" fill="white"/></mask><rect x="0" y="0" width="8" height="8" fill="currentColor" mask="url(#resource-icon)"/></svg>';
+    const projected = projectSafeApplicationGraph({
+      resources: [
+        {
+          id: "res-a",
+          name: "api",
+          type: "Radius.Compute/containers",
+          diffHash: `sha256:${"b".repeat(64)}`,
+          iconHash
+        }
+      ],
+      icons: {
+        [iconHash]: icon,
+        "not-a-hash": sentinel,
+        [`sha256:${"c".repeat(64)}`]: sentinel
+      }
+    });
+    start({
+      selections: { main: selectionOf("main", "resource app = {}") },
+      compiled: {
+        main: applicationGraphToResources(projected) as CanvasGraphResource[]
+      }
+    });
+    const entry = await container!.getOrCreate("panel-a");
+
+    const response = await post(
+      entry.baseUrl,
+      "/api/load-graph",
+      '{"repo":"octo/app"}'
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('fill=\\"currentColor\\"');
+    expect(body).toContain('mask=\\"url(#resource-icon)\\"');
+    expect(body).not.toContain(sentinel);
+    expect(body).not.toContain("not-a-hash");
   });
 
   it("answers the app-bicep handoff payload when the branch has no model", async () => {

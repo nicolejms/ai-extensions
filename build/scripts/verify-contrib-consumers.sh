@@ -3,7 +3,7 @@
 set -euo pipefail
 
 readonly CATALOG_REPO="${CATALOG_REPO:-radius-project/radius}"
-readonly CATALOG_REF="${CATALOG_REF:-745ce9cc0fa6391a7de73cf9eb894521b1cb3053}"
+readonly CATALOG_REF="${CATALOG_REF:-9cdf55cdddec5ff5d382ca49877606e2b9fff3e8}"
 readonly DEFAULTS_YAML="${DEFAULTS_YAML:-}"
 readonly CATALOG_HELPER="${CATALOG_HELPER:-.github/extension/scripts/contrib-catalog.sh}"
 readonly EXTENSION_DIR="${EXTENSION_DIR:-.github/extension}"
@@ -96,16 +96,70 @@ recipe_pack_consumers() {
         sort -u
 }
 
+recipe_pack_file() {
+    local pack="$1" file="$2"
+    printf '%s/pack_%s_%s' "${TMP_ROOT}" "${pack}" "$(basename "${file}")"
+}
+
 verify_recipe_packs() {
-    local pack file url count=0
+    local pack file url pack_file count=0
     while read -r pack file; do
         [[ -n "${pack}" ]] || continue
         url="$(radius_contrib_recipe_pack_url "${pack}" "${file}")"
-        curl -fsSL "${url}" -o /dev/null
+        pack_file="$(recipe_pack_file "${pack}" "${file}")"
+        curl -fsSL "${url}" -o "${pack_file}"
         echo "  Verified recipe pack file ${pack}/${file}"
         ((count += 1))
     done < <(recipe_pack_consumers)
     ((count > 0)) || fail "no recipe pack catalog consumers found."
+}
+
+# Pack names the provider workflows attach by literal name after deploying a
+# catalog-pinned pack. A rename upstream would otherwise only surface as a
+# failed `rad recipe-pack show` during a real deploy.
+attached_pack_names() {
+    local workflow
+    while IFS= read -r -d '' workflow; do
+        yq -r \
+            '.. | select(tag == "!!map") | .run? | select(tag == "!!str")' \
+            "${workflow}" |
+            awk '
+                match($0, /PACK_NAME="[A-Za-z0-9._-]+"/) {
+                    pack_name = substr($0, RSTART + 11, RLENGTH - 12)
+                }
+                match($0, /radius_contrib_recipe_pack_url [A-Za-z0-9._-]+ [A-Za-z0-9._\/-]+/) {
+                    split(substr($0, RSTART, RLENGTH), parts, " ")
+                    if (pack_name != "") { print parts[2], parts[3], pack_name }
+                }
+            '
+    done < <(extension_yaml_files) | sort -u
+}
+
+# The literal names declared by Radius.Core/recipePacks resources in a pack.
+parse_pack_declared_names() {
+    awk -v q="'" '
+        /^resource [A-Za-z0-9_]+ .Radius\.Core\/recipePacks@/ { in_pack = 1; next }
+        in_pack && match($0, "^  name: " q "[^" q "]*" q) {
+            print substr($0, RSTART + 9, RLENGTH - 10)
+            in_pack = 0
+        }
+    ' "$1"
+}
+
+verify_attached_pack_names() {
+    local pack file pack_name pack_file declared count=0
+    while read -r pack file pack_name; do
+        [[ -n "${pack}" ]] || continue
+        pack_file="$(recipe_pack_file "${pack}" "${file}")"
+        [[ -f "${pack_file}" ]] ||
+            fail "verified recipe pack file is unavailable: ${pack_file}"
+        declared="$(parse_pack_declared_names "${pack_file}")"
+        printf '%s\n' "${declared}" | grep -Fxq "${pack_name}" ||
+            fail "recipe pack ${pack}/${file} does not declare the attached pack '${pack_name}'; it declares: ${declared//$'\n'/, }"
+        echo "  Verified recipe pack ${pack}/${file} declares '${pack_name}'"
+        ((count += 1))
+    done < <(attached_pack_names)
+    ((count > 0)) || fail "no attached recipe pack names found."
 }
 
 parse_pack_kube_recipes() {
@@ -125,14 +179,14 @@ parse_pack_kube_recipes() {
 }
 
 kube_recipe_consumers() {
-    local pack file url pack_file
+    local pack file pack_file
     printf '%s\n' "${RUN_BLOCKS}" |
         sed -nE 's/.*radius_contrib_kube_recipe_source (Radius\.[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+) ([a-z0-9._-]+).*/\1 \2/p'
     while read -r pack file; do
         [[ -n "${pack}" ]] || continue
-        url="$(radius_contrib_recipe_pack_url "${pack}" "${file}")"
-        pack_file="${TMP_ROOT}/pack_${pack}_$(basename "${file}")"
-        curl -fsSL "${url}" -o "${pack_file}"
+        pack_file="$(recipe_pack_file "${pack}" "${file}")"
+        [[ -f "${pack_file}" ]] ||
+            fail "verified recipe pack file is unavailable: ${pack_file}"
         parse_pack_kube_recipes "${pack_file}"
     done < <(recipe_pack_consumers)
 }
@@ -230,6 +284,7 @@ main() {
     readonly RUN_BLOCKS
 
     verify_recipe_packs
+    verify_attached_pack_names
     verify_kube_recipes
     verify_git_recipes
     echo "Contrib workflow consumers are valid."

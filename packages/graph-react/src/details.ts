@@ -23,6 +23,8 @@ export type DetailRow =
   | { readonly kind: "summary"; readonly name: string; readonly type: string }
   /** The live provisioning state reported by the control plane. */
   | { readonly kind: "status"; readonly state: string }
+  /** The concrete resource type a recipe resolved to, as secondary detail. */
+  | { readonly kind: "concrete"; readonly type: string }
   /** The producer's message for this resource, leading on a failure. */
   | {
       readonly kind: "message";
@@ -165,6 +167,9 @@ export function buildDetailRows(
     if (data.provisioningState !== undefined) {
       rows.push({ kind: "status", state: data.provisioningState });
     }
+  }
+  if (data.concreteType) {
+    rows.push({ kind: "concrete", type: data.concreteType });
   }
   if (isLocalSourceNode(settings, data)) {
     if (data.srcPath) {

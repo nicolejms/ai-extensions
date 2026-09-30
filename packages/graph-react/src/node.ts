@@ -10,6 +10,7 @@ import type { CSSProperties, ReactElement, ReactNode, MouseEvent } from "react";
 import type { NodeProps } from "reactflow";
 import { isLocalSourceNode } from "./build.js";
 import { safeExternalUrl } from "./external-url.js";
+import { browserCssMaskUrl } from "./html.js";
 import { githubSourceReferenceUrl } from "./model.js";
 import type { GraphNodeData, GraphSettings } from "./build.js";
 import type { GraphCallbacks } from "./callbacks.js";
@@ -139,12 +140,26 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
         badge ? "rad-node__head rad-node__head--with-badge" : "rad-node__head"
     },
     data.icon ?
-      h("img", {
-        className: "rad-node__icon",
-        src: data.icon,
-        alt: "",
-        "data-radius-part": "icon"
-      })
+      // A monochrome icon draws itself in `currentColor`, but inside an <img>
+      // the SVG is a separate document and would always paint black. Painting
+      // it through a CSS mask fills its alpha channel with the theme token, so
+      // it stays legible in light and dark. Multi-color artwork keeps the <img>.
+      data.iconMonochrome ?
+        h("span", {
+          className: "rad-node__icon rad-node__icon--themed",
+          "aria-hidden": "true",
+          "data-radius-part": "icon",
+          style: {
+            WebkitMaskImage: browserCssMaskUrl(data.icon),
+            maskImage: browserCssMaskUrl(data.icon)
+          }
+        })
+      : h("img", {
+          className: "rad-node__icon",
+          src: data.icon,
+          alt: "",
+          "data-radius-part": "icon"
+        })
     : null,
     h(
       "span",
@@ -161,7 +176,7 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
     {
       className: "rad-node__type",
       ref: typeRef,
-      title: data.typeLabel,
+      title: data.concreteType || data.typeLabel,
       "data-radius-part": "node-type"
     },
     data.typeLabel
@@ -212,8 +227,10 @@ export function ResourceNode({ data }: NodeProps<GraphNodeData>): ReactElement {
           "--rad-node-default-border-color": data.borderColor
         } satisfies CSSProperties &
           Record<`--rad-node-default-${string}`, string>,
+        // Clicking the card toggles its panel, so a second click on the same
+        // node dismisses the menu it opened.
         onClick: (event: MouseEvent<HTMLDivElement>) =>
-          showDetails(data, event.currentTarget, false)
+          showDetails(data, event.currentTarget, true)
       },
       settings.enablePopup ?
         h(

@@ -213,7 +213,7 @@ function GraphContent({
       callbacksRef.current.onSelect?.(node);
       if (!enablePopup) return;
       const open = detailsRef.current;
-      // Clicking the same card's "…" button again closes the panel; a
+      // Clicking the same card, or its "…" button, again closes the panel; a
       // different card re-anchors it.
       if (toggle && open?.card === card) {
         closeDetails();

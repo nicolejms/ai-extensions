@@ -326,7 +326,8 @@ function bodyFor(canvas: CanvasHarness, pathName: string): unknown {
 async function routeDeployedPage(
   page: Page,
   deploymentStatus: () => string,
-  abandon?: (body: unknown, nonce: string) => void
+  abandon?: (body: unknown, nonce: string) => void,
+  resources: unknown[] = []
 ): Promise<void> {
   await page.route("**/api/list-applications**", async (route) => {
     await route.fulfill({
@@ -369,7 +370,10 @@ async function routeDeployedPage(
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ resources: [], mode: "greyed" })
+      body: JSON.stringify({
+        resources,
+        mode: resources.length > 0 ? "terminal" : "greyed"
+      })
     });
   });
   await page.route("**/api/deploy-status**", async (route) => {
@@ -813,6 +817,94 @@ test.describe("Radius Canvas in Chromium", () => {
     ]);
   });
 
+  test("shows friendly planned service names and keeps the concrete type in keyboard-accessible details", async ({
+    page,
+    canvas
+  }) => {
+    await canvas.seedState({
+      ...baseCanvasState(canvas.workspacePath),
+      plannedRepo: REPOSITORY,
+      plannedProvider: "azure",
+      plannedBranch: WORKTREE_BRANCH,
+      plannedEnvironment: "fixture-environment",
+      plannedFromWorkspace: true,
+      plannedResources: [
+        {
+          id: "app/web",
+          name: "web",
+          type: "Radius.Compute/containers",
+          outputResources: [
+            {
+              type: "Microsoft.ContainerService/managedClusters@2024-01-01",
+              displayType: "Azure Kubernetes Service"
+            }
+          ]
+        }
+      ]
+    });
+    await page.route("**/api/plan-graph", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ refreshed: true })
+      });
+    });
+
+    await gotoCanvas(page, canvas, "planned");
+
+    const web = page.locator(".rad-node").filter({ hasText: "web" });
+    const type = web.locator(".rad-node__type");
+    await expect(type).toHaveText("Azure Kubernetes Service");
+    await expect(type).toHaveAttribute(
+      "title",
+      "Microsoft.ContainerService/managedClusters@2024-01-01"
+    );
+    const details = web.getByRole("button", { name: "Show details" });
+    await details.focus();
+    await page.keyboard.press("Enter");
+
+    const panel = page.locator("#node-popup");
+    await expect(panel).toContainText("Concrete type");
+    await expect(panel).toContainText(
+      "Microsoft.ContainerService/managedClusters@2024-01-01"
+    );
+    await expectNoWcagViolations(page);
+  });
+
+  test("shows friendly deployed service names with the concrete type in details", async ({
+    page,
+    canvas
+  }) => {
+    await routeDeployedPage(page, () => "success", undefined, [
+      {
+        id: "app/postgres",
+        name: "postgres",
+        type: "Radius.Data/postgreSqlDatabases",
+        deployStatus: "success",
+        outputResources: [
+          {
+            type: "Microsoft.DBforPostgreSQL/flexibleServers",
+            displayType: "Azure Database for PostgreSQL"
+          }
+        ]
+      }
+    ]);
+
+    await gotoCanvas(page, canvas, "deployed");
+
+    const postgres = page.locator(".rad-node").filter({ hasText: "postgres" });
+    const type = postgres.locator(".rad-node__type");
+    await expect(type).toHaveText("Azure Database for PostgreSQL");
+    await expect(type).toHaveAttribute(
+      "title",
+      "Microsoft.DBforPostgreSQL/flexibleServers"
+    );
+    await postgres.getByRole("button", { name: "Show details" }).click();
+    await expect(page.locator("#node-popup")).toContainText(
+      "Microsoft.DBforPostgreSQL/flexibleServers"
+    );
+  });
+
   test("keeps the document canvas dark while navigating between top-level panes", async ({
     page,
     canvas
@@ -1021,6 +1113,35 @@ test.describe("Radius Canvas in Chromium", () => {
     await expect(panel).toBeHidden();
     await expect(details).toBeFocused();
     await expectNoWcagViolations(page);
+  });
+
+  test("dismisses the node menu when the same node is clicked again", async ({
+    page,
+    canvas
+  }) => {
+    await gotoCanvas(page, canvas, "graph");
+    await page.selectOption("#graph-branch", WORKTREE_BRANCH);
+    await expect(page.locator(".rad-node")).toHaveCount(3);
+
+    const panel = page.locator("#node-popup");
+    await expect(panel).toBeHidden();
+
+    const title = page
+      .locator(".rad-node")
+      .filter({ hasText: "web" })
+      .first()
+      .locator(".rad-node__title");
+
+    await title.click();
+    await expect(panel).toBeVisible();
+
+    // The node that opened the menu dismisses it, like any other click outside.
+    await title.click();
+    await expect(panel).toBeHidden();
+
+    // A further click re-opens it, so the node keeps normal toggle behavior.
+    await title.click();
+    await expect(panel).toBeVisible();
   });
 
   test("opens a node source reference through the real open-source route instead of leaving the workspace @safety", async ({
@@ -1468,6 +1589,89 @@ test.describe("Radius Canvas in Chromium", () => {
     await expect(page.locator("#graph-container .status.error")).toBeVisible();
     await expect(page.locator("#graph-status")).toBeHidden();
     await expect(page.locator("#progress-steps")).toHaveCount(0);
+  });
+
+  // The shipped panel titles are what the user reads while they wait, and a
+  // bundling or wiring regression could leave the compiled Graph entry on the
+  // old label with the unit tests still green. This drives the real modeled
+  // Graph page across the boundary that selects the title — a progress stream
+  // that begins by checking for an existing model and then reports
+  // creating_model — and pins the visible text and the progress region's
+  // accessible name in both states.
+  test("retitles the modeled progress panel when the build starts creating a model", async ({
+    page,
+    canvas
+  }) => {
+    await page.route("**/api/load-graph", async () => {
+      // Never fulfilled: the panel must stay up for the whole transition.
+    });
+    let creatingModel = false;
+    await page.route("**/api/progress**", async (route) => {
+      const events =
+        creatingModel ?
+          [
+            {
+              sequence: 1,
+              stage: "checking_model",
+              state: "succeeded",
+              detail: "No application model exists yet."
+            },
+            {
+              sequence: 2,
+              stage: "creating_model",
+              state: "running",
+              detail: "Copilot is creating .radius/app.bicep."
+            }
+          ]
+        : [
+            {
+              sequence: 1,
+              stage: "checking_model",
+              state: "running",
+              detail: "Checking the selected branch for .radius/app.bicep."
+            }
+          ];
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          active: true,
+          view: "graph",
+          generation: 1,
+          events
+        })
+      });
+    });
+
+    await gotoCanvas(page, canvas, "graph");
+
+    const panel = page.locator(".rad-graph-progress");
+    await expect(panel.locator(".rad-graph-progress__title")).toHaveText(
+      "Loading the application graph"
+    );
+    // Resolved through the accessibility tree rather than the attribute, so
+    // the region really is reachable under the name a screen reader announces.
+    await expect(
+      page.getByRole("region", { name: "Loading the application graph" })
+    ).toBeVisible();
+    await expect(page.locator("#progress-steps")).toContainText(
+      "Check for an application model"
+    );
+
+    creatingModel = true;
+
+    await expect(panel.locator(".rad-graph-progress__title")).toHaveText(
+      "Generating the application graph"
+    );
+    await expect(
+      page.getByRole("region", { name: "Generating the application graph" })
+    ).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Loading the application graph" })
+    ).toHaveCount(0);
+    await expect(page.locator("#progress-steps")).toContainText(
+      "Create .radius/app.bicep"
+    );
   });
 
   test("stops the planned graph after a terminal modeling refusal @safety", async ({
@@ -3300,7 +3504,7 @@ test.describe("Radius Canvas in Chromium", () => {
       .toMatchObject({ environment: "fixture-environment" });
   });
 
-  test("reads the full deletion inventory without hidden entries before confirming in Chromium @safety", async ({
+  test("reads the full deletion inventory without hidden entries before confirming in Chromium @safety @cross-platform", async ({
     page,
     canvas
   }) => {

@@ -160,6 +160,16 @@ function baselineStubs(): FakeCommandStub[] {
   return [
     {
       tool: "gh",
+      match: [
+        "api",
+        "--paginate",
+        "--slurp",
+        `repos/${REPOSITORY}/deployments?environment=${ENVIRONMENT}&per_page=100`
+      ],
+      respond: { stdout: "[[]]" }
+    },
+    {
+      tool: "gh",
       match: ["api", "--method", "POST", `repos/${REPOSITORY}/git/refs`],
       respond: {}
     },
@@ -184,6 +194,12 @@ function baselineStubs(): FakeCommandStub[] {
       respond: {}
     },
     { tool: "az", match: ["group", "create"], respond: {} },
+    // The reclaim re-lists both after deleting them, because neither `az ad
+    // app delete` nor `az ad sp delete` proves the object is gone. A scenario
+    // that wants the delete to land marks its own listing stub `times: 1` and
+    // falls through to these, which model the directory after the deletion.
+    { tool: "az", match: APP_LIST, respond: { stdout: "[]" } },
+    { tool: "az", match: SP_LIST, respond: { stdout: "[]" } },
     { tool: "az", match: ["aks", "create"], respond: {} },
     { tool: "az", match: ["group", "delete"], respond: {} },
     { tool: "gh", match: ["repo", "clone"], respond: {} },
@@ -2681,7 +2697,8 @@ describe("createCloudFixture", () => {
         {
           tool: "az",
           match: SP_LIST,
-          respond: { stdout: '[{"id":"sp-1","appId":"app-1"}]' }
+          respond: { stdout: '[{"id":"sp-1","appId":"app-1"}]' },
+          times: 1
         },
         {
           tool: "az",
@@ -2690,7 +2707,8 @@ describe("createCloudFixture", () => {
             stdout: JSON.stringify([
               { appId: "app-1", id: "obj-1", displayName: APP_NAME }
             ])
-          }
+          },
+          times: 1
         },
         { tool: "az", match: ["ad", "sp", "delete"], respond: {} },
         { tool: "az", match: ["ad", "app", "delete"], respond: {} },
@@ -2791,7 +2809,8 @@ describe("createCloudFixture", () => {
         {
           tool: "az",
           match: SP_LIST,
-          respond: { stdout: '[{"id":"sp-1","appId":"app-1"}]' }
+          respond: { stdout: '[{"id":"sp-1","appId":"app-1"}]' },
+          times: 1
         },
         {
           tool: "az",
@@ -2800,7 +2819,8 @@ describe("createCloudFixture", () => {
             stdout: JSON.stringify([
               { appId: "app-1", id: "obj-1", displayName: APP_NAME }
             ])
-          }
+          },
+          times: 1
         },
         {
           tool: "az",
@@ -2835,7 +2855,8 @@ describe("createCloudFixture", () => {
         {
           tool: "az",
           match: SP_LIST,
-          respond: { stdout: '[{"id":"orphan-sp"}]' }
+          respond: { stdout: '[{"id":"orphan-sp"}]' },
+          times: 1
         },
         { tool: "az", match: ["ad", "sp", "delete"], respond: {} }
       ]);
@@ -2877,7 +2898,8 @@ describe("createCloudFixture", () => {
           {
             tool: "az",
             match: SP_LIST,
-            respond: { stdout: '[{"id":"sp-1"}]' }
+            respond: { stdout: '[{"id":"sp-1"}]' },
+            times: 1
           },
           {
             tool: "az",
@@ -3146,6 +3168,221 @@ describe("createCloudFixture", () => {
         ).toThrow(message);
       }
     );
+
+    // Deleting the GitHub Environment leaves its deployment records behind,
+    // because the two are linked by name rather than id. The extension never
+    // removes one -- to the product it is history, not a resource it owns --
+    // so the run that caused them has to.
+    it("purges the deployment records the run left on its environment", async () => {
+      const { fixture, fake } = await createHarness([
+        {
+          tool: "gh",
+          match: [
+            "api",
+            "--paginate",
+            "--slurp",
+            `repos/${REPOSITORY}/deployments?environment=${ENVIRONMENT}&per_page=100`
+          ],
+          // Two pages: an environment can accumulate more records than a
+          // single page holds, and stopping at the first would strand the rest.
+          respond: { stdout: '[[{"id":41}],[{"id":42}]]' }
+        },
+        {
+          tool: "gh",
+          match: [
+            "api",
+            "--method",
+            "POST",
+            `repos/${REPOSITORY}/deployments/41/statuses`
+          ],
+          respond: {}
+        },
+        {
+          tool: "gh",
+          match: [
+            "api",
+            "--method",
+            "DELETE",
+            `repos/${REPOSITORY}/deployments/41`
+          ],
+          respond: {}
+        },
+        {
+          tool: "gh",
+          match: [
+            "api",
+            "--method",
+            "POST",
+            `repos/${REPOSITORY}/deployments/42/statuses`
+          ],
+          respond: {}
+        },
+        {
+          tool: "gh",
+          match: [
+            "api",
+            "--method",
+            "DELETE",
+            `repos/${REPOSITORY}/deployments/42`
+          ],
+          respond: {}
+        }
+      ]);
+
+      await expect(fixture.reclaimLeakedProductArtifacts()).resolves.toContain(
+        `2 GitHub deployment record(s) for ${ENVIRONMENT}`
+      );
+      // GitHub refuses to delete an active deployment, and a record whose job
+      // never reported a status is active, so the deactivation has to come
+      // first or the delete is rejected.
+      const lines = fake.commands.commandLines("gh");
+      expect(
+        lines.findIndex((line) => line.includes("POST") && line.includes("41"))
+      ).toBeLessThan(
+        lines.findIndex(
+          (line) => line.includes("DELETE") && line.includes("deployments/41")
+        )
+      );
+    });
+
+    it("reports a deployment listing it could not read instead of assuming none", async () => {
+      const { fixture } = await createHarness([
+        {
+          tool: "gh",
+          match: [
+            "api",
+            "--paginate",
+            "--slurp",
+            `repos/${REPOSITORY}/deployments?environment=${ENVIRONMENT}&per_page=100`
+          ],
+          respond: { stdout: '[[{"environment":"radtest"}]]' }
+        }
+      ]);
+
+      await expect(fixture.reclaimLeakedProductArtifacts()).rejects.toThrow(
+        /probe GitHub deployment records for radtest-run0000000a: .*no usable numeric "id"/s
+      );
+    });
+
+    // A deployment record names its environment but outlives it, so deleting
+    // the environment while a record survives strands that record behind a
+    // name nothing will ever match again -- the exact leak this step exists to
+    // prevent.
+    it.each([
+      [
+        "deactivation",
+        [
+          "api",
+          "--method",
+          "POST",
+          `repos/${REPOSITORY}/deployments/41/statuses`
+        ],
+        "POST deployments/41/statuses"
+      ],
+      [
+        "delete",
+        ["api", "--method", "DELETE", `repos/${REPOSITORY}/deployments/41`],
+        "DELETE deployments/41"
+      ]
+    ])(
+      "preserves the environment when a deployment record %s fails",
+      async (_label, match, context) => {
+        const { fixture, fake } = await createHarness([
+          {
+            tool: "gh",
+            match: [
+              "api",
+              "--paginate",
+              "--slurp",
+              `repos/${REPOSITORY}/deployments?environment=${ENVIRONMENT}&per_page=100`
+            ],
+            respond: { stdout: '[[{"id":41}]]' }
+          },
+          failing(
+            "gh",
+            match,
+            "HTTP 403: Resource not accessible by integration"
+          ),
+          {
+            tool: "gh",
+            match: [
+              "api",
+              "--method",
+              "POST",
+              `repos/${REPOSITORY}/deployments/41/statuses`
+            ],
+            respond: {}
+          }
+        ]);
+
+        const error = await captureError(
+          fixture.reclaimLeakedProductArtifacts()
+        );
+
+        expect(error.message).toContain(
+          `1 GitHub deployment record(s) for ${ENVIRONMENT}`
+        );
+        expect(error.message).toContain(context);
+        expect(error.message).toContain(
+          `preserve GitHub environment ${ENVIRONMENT}`
+        );
+        expect(
+          fake.commands
+            .commandLines("gh")
+            .some(
+              (line) =>
+                line.includes("DELETE") &&
+                line.includes(`environments/${ENVIRONMENT}`)
+            )
+        ).toBe(false);
+      }
+    );
+
+    it("keeps reclaiming the remaining artifacts after a deployment record fails", async () => {
+      const { fixture, fake } = await createHarness([
+        {
+          tool: "gh",
+          match: [
+            "api",
+            "--paginate",
+            "--slurp",
+            `repos/${REPOSITORY}/deployments?environment=${ENVIRONMENT}&per_page=100`
+          ],
+          respond: { stdout: '[[{"id":41}]]' }
+        },
+        failing(
+          "gh",
+          ["api", "--method", "DELETE", `repos/${REPOSITORY}/deployments/41`],
+          "HTTP 403: Resource not accessible by integration"
+        ),
+        {
+          tool: "gh",
+          match: [
+            "api",
+            "--method",
+            "POST",
+            `repos/${REPOSITORY}/deployments/41/statuses`
+          ],
+          respond: {}
+        }
+      ]);
+
+      await expect(fixture.reclaimLeakedProductArtifacts()).rejects.toThrow(
+        /deployment record/
+      );
+      // The environment is held back deliberately, but everything downstream of
+      // it is unrelated to the stranded record and still has to be reclaimed.
+      expect(
+        fake.commands
+          .commandLines("gh-package")
+          .some((line) => line.includes("packages/container"))
+      ).toBe(true);
+      expect(
+        fake.commands
+          .commandLines("gh")
+          .some((line) => line.includes(`PATCH ${DEFAULT_REF_PATH}`))
+      ).toBe(false);
+    });
 
     it("reports targeted workload cleanup failure and continues reclaiming other artifacts", async () => {
       const { fixture, fake } = await createHarness(
@@ -3419,12 +3656,22 @@ describe("createCloudFixture", () => {
           respond: {
             stdout: '{"status":"completed","conclusion":"failure"}'
           }
+        },
+        {
+          tool: "az",
+          match: ["aks", "get-credentials"],
+          respond: {}
+        },
+        {
+          tool: "kubectl",
+          match: ["delete", "all"],
+          respond: {}
         }
       ]);
       fixture.registerApplicationCleanupTarget("demo", "default-demo");
 
       await expect(fixture.reclaimLeakedProductArtifacts()).rejects.toThrow(
-        /preserving its identity, GitHub Environment, state package, and repository workflows for recovery/
+        /preserving its identity, GitHub Environment, state package, and repository workflows for recovery:.*Reclaimed before failing: Kubernetes workloads for demo in default-demo/s
       );
 
       const gh = fake.commands.commandLines("gh");
@@ -3437,7 +3684,73 @@ describe("createCloudFixture", () => {
       expect(fake.commands.commandLines("az")).not.toContain(
         `ad sp list --filter ${EXACT_NAME_FILTER} --query [].{id:id,appId:appId} -o json`
       );
-      expect(fake.commands.commandLines("kubectl")).toEqual([]);
+      expect(fake.commands.commandLines("kubectl")).toEqual([
+        `--kubeconfig ${WORKSPACE}/kubeconfig delete all --namespace default-demo ` +
+          "--selector radapp.io/application=demo --ignore-not-found=true --wait=true"
+      ]);
+    });
+
+    it("reports Radius and Kubernetes cleanup failures before preserving recovery inputs", async () => {
+      const { fixture, fake } = await createHarness(
+        [
+          {
+            tool: "gh",
+            match: ["run", "view"],
+            respond: {
+              stdout: '{"status":"completed","conclusion":"failure"}'
+            }
+          },
+          {
+            tool: "az",
+            match: ["aks", "get-credentials"],
+            respond: {}
+          },
+          failing("kubectl", ["delete", "all"], "namespace unavailable"),
+          {
+            tool: "kubectl",
+            match: ["get", RADIUS_RENDERED_RESOURCES],
+            respond: {
+              stdout: JSON.stringify({
+                items: [
+                  {
+                    kind: "HorizontalPodAutoscaler",
+                    metadata: { name: "sleeper" }
+                  }
+                ]
+              })
+            }
+          }
+        ],
+        {},
+        { assertionTimeoutMs: 2000, assertionPollIntervalMs: 1000 }
+      );
+      fixture.registerApplicationCleanupTarget("demo", "default-demo");
+
+      const error = await fixture.reclaimLeakedProductArtifacts().then(
+        () => undefined,
+        (reason: unknown) => reason
+      );
+
+      expect(error).toBeInstanceOf(Error);
+      if (!(error instanceof Error)) {
+        throw new Error("Expected reclamation to fail");
+      }
+      expect(error.message).toContain(
+        `Radius application demo in ${ENVIRONMENT}`
+      );
+      expect(error.message).toContain(
+        "Kubernetes workloads for demo in default-demo"
+      );
+      expect(error.message).toContain("namespace unavailable");
+      expect(error.message).toContain("HorizontalPodAutoscaler/sleeper");
+      expect(error.message).toContain(
+        "preserving its identity, GitHub Environment, state package, and repository workflows for recovery"
+      );
+      expect(
+        fake.commands
+          .commandLines("gh")
+          .some((line) => line.includes(ENVIRONMENT_PATH))
+      ).toBe(false);
     });
 
     it("closes an open pull request even when its branch is already gone", async () => {
@@ -3516,6 +3829,18 @@ describe("createCloudFixture", () => {
               { appId: "app-1", id: "obj-1", displayName: APP_NAME },
               { appId: "app-2", id: "obj-2", displayName: APP_NAME }
             ])
+          },
+          times: 1
+        },
+        // app-2's delete lands, so only the app whose delete was refused is
+        // still in the directory when the reclaim confirms the removal.
+        {
+          tool: "az",
+          match: APP_LIST,
+          respond: {
+            stdout: JSON.stringify([
+              { appId: "app-1", id: "obj-1", displayName: APP_NAME }
+            ])
           }
         },
         {
@@ -3546,6 +3871,147 @@ describe("createCloudFixture", () => {
       expect(error.message).toContain(
         "Reclaimed before failing: app registration app-2."
       );
+    });
+
+    // A run reported this step reclaimed while the app registration was still
+    // live and not even in Entra's deleted items, which then wedged the next
+    // run at the clean-slate check.
+    it("fails when the app registration survives a delete that reported success", async () => {
+      const { fixture } = await createHarness(
+        [
+          {
+            tool: "az",
+            match: APP_LIST,
+            respond: {
+              stdout: JSON.stringify([
+                { appId: "app-1", id: "obj-1", displayName: APP_NAME }
+              ])
+            }
+          },
+          { tool: "az", match: ["ad", "app", "delete"], respond: {} }
+        ],
+        {},
+        { assertionTimeoutMs: 2000, assertionPollIntervalMs: 1000 }
+      );
+
+      const error = await captureError(fixture.reclaimLeakedProductArtifacts());
+
+      expect(error.message).toContain("app registration app-1");
+      expect(error.message).toContain("succeeded");
+      expect(error.message).toContain("still listed after 2000ms");
+    });
+
+    it("fails when a delete reporting the app was already absent leaves it listed", async () => {
+      const { fixture } = await createHarness(
+        [
+          {
+            tool: "az",
+            match: APP_LIST,
+            respond: {
+              stdout: JSON.stringify([
+                { appId: "app-1", id: "obj-1", displayName: APP_NAME }
+              ])
+            }
+          },
+          {
+            tool: "az",
+            match: ["ad", "app", "delete"],
+            respond: {
+              code: 1,
+              stderr:
+                "ERROR: Resource 'Application_obj-1' does not exist or one of its queried reference-property objects are not present."
+            }
+          }
+        ],
+        {},
+        { assertionTimeoutMs: 2000, assertionPollIntervalMs: 1000 }
+      );
+
+      const error = await captureError(fixture.reclaimLeakedProductArtifacts());
+
+      expect(error.message).toContain(
+        "reported the object id was already absent and the client-id retry did not remove it"
+      );
+      expect(error.message).toContain("still listed after 2000ms");
+    });
+
+    it("retries application deletion by client id when object-id deletion reports not found", async () => {
+      const { fixture, fake } = await createHarness([
+        {
+          tool: "az",
+          match: APP_LIST,
+          respond: {
+            stdout: JSON.stringify([
+              { appId: "app-1", id: "obj-1", displayName: APP_NAME }
+            ])
+          },
+          times: 1
+        },
+        {
+          tool: "az",
+          match: ["ad", "app", "delete", "--id", "obj-1"],
+          respond: {
+            code: 1,
+            stderr:
+              "ERROR: Resource 'Application_obj-1' does not exist or one of its queried reference-property objects are not present."
+          }
+        },
+        {
+          tool: "az",
+          match: ["ad", "app", "delete", "--id", "app-1"],
+          respond: {}
+        }
+      ]);
+
+      await expect(fixture.reclaimLeakedProductArtifacts()).resolves.toContain(
+        "app registration app-1"
+      );
+      expect(fake.commands.commandLines("az")).toContain(
+        "ad app delete --id app-1 --output none"
+      );
+    });
+
+    it("fails when a service principal outlives the application it belonged to", async () => {
+      const { fixture } = await createHarness(
+        [
+          {
+            tool: "az",
+            match: SP_LIST,
+            respond: { stdout: '[{"id":"sp-1","appId":"app-1"}]' }
+          },
+          { tool: "az", match: ["ad", "sp", "delete"], respond: {} },
+          {
+            tool: "az",
+            match: APP_LIST,
+            respond: { stdout: "[]" }
+          }
+        ],
+        {},
+        { assertionTimeoutMs: 2000, assertionPollIntervalMs: 1000 }
+      );
+
+      const error = await captureError(fixture.reclaimLeakedProductArtifacts());
+
+      expect(error.message).toContain(
+        "verify no service principal for radius-deploy-fixture-owner-fixture-repo survives"
+      );
+      expect(error.message).toContain("sp-1");
+    });
+
+    it("does not demand principal absence when an application was deliberately preserved", async () => {
+      const { fixture } = await createHarness([
+        {
+          tool: "az",
+          match: SP_LIST,
+          respond: { stdout: '[{"id":"sp-1","appId":"app-1"}]' }
+        },
+        failing("az", ["ad", "sp", "delete"], "Insufficient privileges")
+      ]);
+
+      const error = await captureError(fixture.reclaimLeakedProductArtifacts());
+
+      expect(error.message).toContain("Insufficient privileges");
+      expect(error.message).not.toContain("verify no service principal");
     });
 
     it("records a failing app registration listing without abandoning the rest", async () => {
@@ -3759,6 +4225,30 @@ describe("createCloudFixture", () => {
       );
     });
 
+    it("rejects a delete 404 when the GHCR state package is still readable", async () => {
+      const packageBody = JSON.stringify({
+        visibility: "internal",
+        repository: { full_name: REPOSITORY }
+      });
+      const { fixture } = await createHarness([
+        {
+          tool: "gh-package",
+          match: ["api", "--method", "DELETE", PACKAGE_PATH],
+          respond: NOT_FOUND
+        },
+        {
+          tool: "gh-package",
+          match: ["api", PACKAGE_PATH],
+          respond: { stdout: packageBody },
+          times: 2
+        }
+      ]);
+
+      await expect(fixture.reclaimLeakedProductArtifacts()).rejects.toThrow(
+        /returned HTTP 404, but the package is still readable.*does not have effective delete access/s
+      );
+    });
+
     it("records an unreadable GHCR state package probe and continues cleanup", async () => {
       const { fixture, fake } = await createHarness([
         failing("gh-package", ["api", PACKAGE_PATH], "HTTP 502"),
@@ -3799,7 +4289,7 @@ describe("createCloudFixture", () => {
     });
 
     it("records a failing pull-request close and continues cleanup", async () => {
-      const { fixture } = await createHarness([
+      const { fixture, fake } = await createHarness([
         {
           tool: "gh",
           match: ["api", PULLS_PATH],
@@ -3827,8 +4317,13 @@ describe("createCloudFixture", () => {
       ]);
 
       await expect(fixture.reclaimLeakedProductArtifacts()).rejects.toThrow(
-        /pull request #9: .*HTTP 403.*Reclaimed before failing: main reset/s
+        /pull request #9: .*HTTP 403/s
       );
+      expect(
+        fake.commands
+          .commandLines("gh")
+          .some((line) => line.includes(`PATCH ${DEFAULT_REF_PATH}`))
+      ).toBe(false);
     });
 
     it("records a failing default branch read", async () => {

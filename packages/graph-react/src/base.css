@@ -38,6 +38,19 @@
   flex: none;
   object-fit: contain;
 }
+/* Monochrome (currentColor) icons are painted through a CSS mask so they follow
+   the host theme instead of always rendering black. The mask-image itself is
+   set inline per node. */
+.radius-graph .rad-node__icon--themed {
+  display: block;
+  background-color: var(--rad-text, currentColor);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
 .radius-graph .rad-node__badge {
   position: absolute;
   right: 12px;

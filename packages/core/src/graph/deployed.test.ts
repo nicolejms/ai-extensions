@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   deployStatusKeys,
   lookupDeployStatus,
+  mergeDeployedGraphDisplayMetadata,
   mergeDeployedGraphMetadata,
   projectDeployedGraph
 } from "./deployed.js";
@@ -119,6 +120,20 @@ describe("projectDeployedGraph", () => {
     expect(resources[0].outputResources).toHaveLength(1);
   });
 
+  it("preserves the authored definition location", () => {
+    const projected = projectDeployedGraph([
+      makeResource("Radius.Compute/containers", "api", {
+        definitionFile: "infra/app.bicep",
+        definitionLine: 42
+      })
+    ]);
+
+    expect(projected[0]).toMatchObject({
+      definitionFile: "infra/app.bicep",
+      definitionLine: 42
+    });
+  });
+
   it("defaults every unknown resource to pending", () => {
     const projected = projectDeployedGraph([
       makeResource("Radius.Compute/containers", "api")
@@ -140,6 +155,20 @@ describe("projectDeployedGraph", () => {
       "in_progress",
       "failed"
     ]);
+  });
+
+  it("matches status by output resource id without serializing the lookup metadata", () => {
+    const projected = projectDeployedGraph(
+      [
+        makeResource("Radius.Compute/containers", "api", {
+          outputResourceIds: ["provider-output"]
+        })
+      ],
+      { "provider-output": "success" }
+    );
+
+    expect(projected[0].deployStatus).toBe("success");
+    expect(projected[0]).not.toHaveProperty("outputResourceIds");
   });
 
   it("keeps a status a resource already carries when the map does not mention it", () => {
@@ -167,7 +196,7 @@ describe("projectDeployedGraph", () => {
     expect(projected[0].deployStatus).toBe("success");
   });
 
-  it("applies the visualization filter before projecting (#145, #149)", () => {
+  it("applies the visualization filter to projected resources (#145, #149)", () => {
     const api = makeResource("Radius.Compute/containers", "api");
     const image = makeResource("Radius.Compute/containerImages", "apiImage");
     const secret = makeResource(
@@ -179,11 +208,42 @@ describe("projectDeployedGraph", () => {
     expect(projected.map((r) => r.name)).toEqual(["api"]);
   });
 
+  it("rejects non-redacted Secret data before visualization filtering", () => {
+    const sentinel = "fixture-plaintext-value";
+    const image = makeResource("Radius.Compute/containerImages", "apiImage");
+    const secret = makeResource(
+      "Radius.Security/secrets",
+      "radius-ghcr-registry-creds",
+      {
+        properties: { data: { password: sentinel } },
+        connections: [{ id: image.id, direction: "Outbound" }]
+      }
+    );
+
+    expect(() => projectDeployedGraph([image, secret])).toThrowError(
+      expect.objectContaining({
+        message: expect.not.stringContaining(sentinel)
+      })
+    );
+  });
+
   it("clones connections so the projection cannot mutate the modeled graph", () => {
     const api = makeResource("Radius.Compute/containers", "api", {
-      connections: [{ id: "db", direction: "Outbound" }]
+      connections: [
+        {
+          id: "db",
+          direction: "Outbound",
+          kind: "Connection",
+          properties: { password: "not-serialized" }
+        }
+      ],
+      properties: { data: "not-serialized" }
     });
     const projected = projectDeployedGraph([api]);
+    expect(projected[0]).not.toHaveProperty("properties");
+    expect(projected[0].connections).toEqual([
+      { id: "db", direction: "Outbound", kind: "Connection" }
+    ]);
     projected[0].connections[0].direction = "Inbound";
     expect(api.connections[0].direction).toBe("Outbound");
   });
@@ -198,6 +258,7 @@ describe("projectDeployedGraph", () => {
   it("returns an empty array for non-array input", () => {
     expect(projectDeployedGraph(undefined as any)).toEqual([]);
     expect(projectDeployedGraph(null as any)).toEqual([]);
+    expect(projectDeployedGraph([null, "invalid"] as any[])).toEqual([]);
   });
 });
 
@@ -275,11 +336,322 @@ describe("mergeDeployedGraphMetadata", () => {
     expect(merged[0].outputResources).toEqual(modeled[0].outputResources);
   });
 
+  describe("mergeDeployedGraphDisplayMetadata", () => {
+    const modeled = [
+      makeResource("Radius.Data/mySqlDatabases", "mysql", {
+        outputResources: [
+          {
+            id: "deployed-server",
+            type: "Microsoft.DBforMySQL/flexibleServers@2025-01-01",
+            portalUrl: "https://portal.azure.com/mysql"
+          }
+        ],
+        connections: [{ id: "api", direction: "Outbound" }]
+      })
+    ];
+
+    it("copies only friendly display metadata onto matching outputs", () => {
+      const merged = mergeDeployedGraphDisplayMetadata(modeled, [
+        {
+          ...modeled[0],
+          outputResources: [
+            {
+              id: "planned-server",
+              type: "Microsoft.DBforMySQL/flexibleServers@2024-01-01",
+              displayType: "Azure Database for MySQL",
+              portalUrl: "https://portal.azure.com/planned-only"
+            }
+          ]
+        }
+      ]);
+
+      expect(merged[0].outputResources).toEqual([
+        {
+          id: "deployed-server",
+          type: "Microsoft.DBforMySQL/flexibleServers@2025-01-01",
+          displayType: "Azure Database for MySQL",
+          portalUrl: "https://portal.azure.com/mysql"
+        }
+      ]);
+      expect(JSON.stringify(merged)).not.toContain("planned-only");
+      expect(merged[0].connections).toEqual(modeled[0].connections);
+    });
+
+    it("creates safe type-only display metadata when the final graph has no outputs", () => {
+      const merged = mergeDeployedGraphDisplayMetadata(
+        [{ id: modeled[0].id, name: "mysql", outputResources: [] }],
+        [
+          {
+            ...modeled[0],
+            outputResources: [
+              {
+                id: "planned-server",
+                type: "Microsoft.DBforMySQL/flexibleServers@2024-01-01",
+                displayType: "Azure Database for MySQL",
+                portalUrl: "https://portal.azure.com/planned-only"
+              }
+            ]
+          }
+        ]
+      );
+
+      expect(merged[0].outputResources).toEqual([
+        {
+          type: "Microsoft.DBforMySQL/flexibleServers@2024-01-01",
+          displayType: "Azure Database for MySQL"
+        }
+      ]);
+      expect(JSON.stringify(merged)).not.toContain("planned-server");
+      expect(JSON.stringify(merged)).not.toContain("portal.azure.com");
+    });
+
+    it("appends a missing primary output beside sparse supporting metadata", () => {
+      const merged = mergeDeployedGraphDisplayMetadata(
+        [
+          {
+            id: modeled[0].id,
+            name: "mysql",
+            outputResources: [
+              {
+                id: "secret",
+                type: "core/Secret",
+                displayType: "Secret"
+              }
+            ]
+          }
+        ],
+        [
+          {
+            ...modeled[0],
+            outputResources: [
+              {
+                id: "deployment",
+                type: "apps/Deployment",
+                displayType: "Deployment (EKS)",
+                portalUrl: "https://console.aws.amazon.com/planned-only"
+              }
+            ]
+          }
+        ]
+      );
+
+      expect(merged[0].outputResources).toEqual([
+        { id: "secret", type: "core/Secret", displayType: "Secret" },
+        { type: "apps/Deployment", displayType: "Deployment (EKS)" }
+      ]);
+      expect(JSON.stringify(merged)).not.toContain("planned-only");
+      expect(JSON.stringify(merged)).not.toContain('"id":"deployment"');
+    });
+
+    it("matches parents only by exact id and ignores malformed inputs", () => {
+      expect(mergeDeployedGraphDisplayMetadata(undefined as any, [])).toEqual(
+        []
+      );
+      expect(
+        mergeDeployedGraphDisplayMetadata(modeled, [
+          {
+            id: "different-id",
+            outputResources: [
+              {
+                type: "Microsoft.DBforMySQL/flexibleServers",
+                displayType: "Wrong resource"
+              }
+            ]
+          },
+          null
+        ])
+      ).toEqual(modeled);
+    });
+
+    it("accepts wrapped sources, keeps the first duplicate, and drops unusable outputs", () => {
+      const source = {
+        resources: [
+          {
+            ...modeled[0],
+            outputResources: [
+              null,
+              { type: 42, displayType: 7 },
+              { displayType: "Friendly output" }
+            ]
+          },
+          {
+            ...modeled[0],
+            outputResources: [
+              {
+                type: "apps/Deployment",
+                displayType: "Ignored duplicate"
+              }
+            ]
+          },
+          { name: "missing-id", outputResources: [] }
+        ]
+      };
+      const merged = mergeDeployedGraphDisplayMetadata(
+        [
+          null,
+          "invalid",
+          { id: modeled[0].id, name: "mysql", outputResources: [] },
+          { name: "no-id", outputResources: [] }
+        ] as any[],
+        source
+      );
+
+      expect(merged).toEqual([
+        {
+          id: modeled[0].id,
+          name: "mysql",
+          connections: [],
+          outputResources: [{ displayType: "Friendly output" }]
+        },
+        {
+          name: "no-id",
+          connections: [],
+          outputResources: []
+        }
+      ]);
+    });
+  });
+
   it("preserves provider-resolved outputs when deployment metadata is empty", () => {
     const merged = mergeDeployedGraphMetadata(modeled, [
       { ...modeled[0], outputResources: [] }
     ]);
     expect(merged[0].outputResources).toEqual(modeled[0].outputResources);
+  });
+
+  it("preserves friendly output types when deployed metadata omits them", () => {
+    const previous = [
+      makeResource("Radius.Data/mySqlDatabases", "db", {
+        outputResources: [
+          {
+            id: "same-id",
+            type: "Microsoft.DBforMySQL/flexibleServers@2024-01-01",
+            displayType: "Azure Database for MySQL"
+          },
+          {
+            id: "planned-cluster",
+            type: "Microsoft.ContainerService/managedClusters@2024-02-01",
+            displayType: "Azure Kubernetes Service"
+          }
+        ]
+      })
+    ];
+    const merged = mergeDeployedGraphMetadata(previous, [
+      {
+        ...previous[0],
+        outputResources: [
+          {
+            id: "same-id",
+            type: "Microsoft.DBforMySQL/flexibleServers@2025-01-01",
+            portalUrl: "https://portal.azure.com/mysql"
+          },
+          {
+            id: "deployed-cluster",
+            type: "Microsoft.ContainerService/managedClusters@2025-01-01"
+          }
+        ]
+      }
+    ]);
+
+    expect(merged[0].outputResources).toEqual([
+      {
+        id: "same-id",
+        type: "Microsoft.DBforMySQL/flexibleServers@2025-01-01",
+        displayType: "Azure Database for MySQL",
+        portalUrl: "https://portal.azure.com/mysql"
+      },
+      {
+        id: "deployed-cluster",
+        type: "Microsoft.ContainerService/managedClusters@2025-01-01",
+        displayType: "Azure Kubernetes Service"
+      }
+    ]);
+  });
+
+  it("keeps a deployed friendly type and never borrows one without an identity match", () => {
+    const previous = [
+      makeResource("Radius.Compute/containers", "api", {
+        outputResources: [
+          {
+            id: "planned",
+            type: "apps/Deployment",
+            displayType: "Deployment (K8s)"
+          }
+        ]
+      })
+    ];
+    const merged = mergeDeployedGraphMetadata(previous, [
+      {
+        ...previous[0],
+        outputResources: [
+          {
+            id: "deployed",
+            type: "apps/StatefulSet",
+            displayType: "StatefulSet"
+          },
+          { id: "unknown", type: "batch/Job" }
+        ]
+      }
+    ]);
+
+    expect(merged[0].outputResources).toEqual([
+      {
+        id: "deployed",
+        type: "apps/StatefulSet",
+        displayType: "StatefulSet"
+      },
+      { id: "unknown", type: "batch/Job" }
+    ]);
+  });
+
+  it("prefers an exact output id over a same-type fallback", () => {
+    const previous = [
+      makeResource("Radius.Compute/containers", "api", {
+        outputResources: [
+          {
+            id: "first",
+            type: "apps/Deployment",
+            displayType: "First deployment"
+          },
+          {
+            id: "second",
+            type: "apps/Deployment",
+            displayType: "Second deployment"
+          }
+        ]
+      })
+    ];
+    const merged = mergeDeployedGraphMetadata(previous, [
+      {
+        ...previous[0],
+        outputResources: [{ id: "second", type: "apps/Deployment" }]
+      }
+    ]);
+
+    expect(merged[0].outputResources[0].displayType).toBe("Second deployment");
+  });
+
+  it("falls back to a same-type friendly name when the exact id has none", () => {
+    const previous = [
+      makeResource("Radius.Compute/containers", "api", {
+        outputResources: [
+          { id: "exact", type: "apps/Deployment" },
+          {
+            id: "friendly",
+            type: "apps/Deployment",
+            displayType: "Deployment (K8s)"
+          }
+        ]
+      })
+    ];
+    const merged = mergeDeployedGraphMetadata(previous, [
+      {
+        ...previous[0],
+        outputResources: [{ id: "exact", type: "apps/Deployment" }]
+      }
+    ]);
+
+    expect(merged[0].outputResources[0].displayType).toBe("Deployment (K8s)");
   });
 
   it("keeps the first duplicate parent and never mutates either input", () => {
@@ -308,6 +680,14 @@ describe("mergeDeployedGraphMetadata", () => {
     expect(mergeDeployedGraphMetadata([{ name: "no-id" }], null)).toEqual([
       { name: "no-id", connections: [], outputResources: [] }
     ]);
+    expect(
+      mergeDeployedGraphMetadata(
+        [null, "invalid", { id: "valid", name: "valid" }] as any[],
+        null
+      )
+    ).toEqual([
+      { id: "valid", name: "valid", connections: [], outputResources: [] }
+    ]);
   });
 
   it("ignores malformed deployed parents and output collections", () => {
@@ -316,5 +696,87 @@ describe("mergeDeployedGraphMetadata", () => {
       { id: modeled[0].id, outputResources: "invalid" }
     ]);
     expect(merged[0].outputResources).toEqual(modeled[0].outputResources);
+  });
+
+  it("drops unknown and secret-shaped fields from deployed outputs", () => {
+    const merged = mergeDeployedGraphMetadata(modeled, [
+      {
+        id: modeled[0].id,
+        outputResources: [
+          {
+            id: "deployed",
+            name: "deployment",
+            type: "apps/Deployment",
+            deployStatus: "success",
+            properties: { password: "fixture-plaintext-value" },
+            secretValue: "fixture-plaintext-value"
+          }
+        ]
+      }
+    ]);
+
+    expect(merged[0].outputResources).toEqual([
+      {
+        id: "deployed",
+        name: "deployment",
+        type: "apps/Deployment",
+        deployStatus: "success"
+      }
+    ]);
+    expect(JSON.stringify(merged)).not.toContain("fixture-plaintext-value");
+  });
+
+  it("rejects non-redacted Secret data in deployed parent metadata", () => {
+    const sentinel = "fixture-plaintext-value";
+    const deployed = [
+      {
+        id: modeled[0].id,
+        name: "app-secret",
+        type: "Radius.Security/secrets",
+        properties: { data: { password: sentinel } }
+      }
+    ];
+
+    expect(() => mergeDeployedGraphMetadata(modeled, deployed)).toThrowError(
+      expect.objectContaining({
+        message: expect.not.stringContaining(sentinel)
+      })
+    );
+  });
+
+  it("ignores malformed output identity and display fields", () => {
+    const malformedModeled = [
+      makeResource("Radius.Compute/containers", "api", {
+        outputResources: [
+          null,
+          { id: 1, type: 2, displayType: 3 },
+          {
+            id: "duplicate",
+            type: "apps/Deployment",
+            displayType: "Deployment"
+          },
+          {
+            id: "duplicate",
+            type: "apps/Deployment",
+            displayType: "Ignored duplicate"
+          }
+        ]
+      })
+    ];
+    const merged = mergeDeployedGraphMetadata(malformedModeled, [
+      {
+        ...malformedModeled[0],
+        outputResources: [
+          null,
+          { id: 1, type: 2, displayType: 3 },
+          { id: "missing", type: "batch/Job" }
+        ]
+      }
+    ]);
+
+    expect(merged[0].outputResources).toEqual([
+      {},
+      { id: "missing", type: "batch/Job" }
+    ]);
   });
 });

@@ -2,12 +2,18 @@
 // the shared diff algorithm, the visualization filter, and the deployed-status
 // projection. Normalization helpers stay module-internal in ./model.js.
 
-export { applicationGraphToResources } from "./appgraph.js";
+export {
+  applicationGraphToResources,
+  projectGraphOutputMetadata,
+  projectSafeApplicationGraph
+} from "./appgraph.js";
+export type { SafeApplicationGraph } from "./appgraph.js";
 export { computeGraphDiff } from "./diff.js";
 export { filterGraphVisualizationResources } from "./visualization.js";
 export {
   deployStatusKeys,
   lookupDeployStatus,
+  mergeDeployedGraphDisplayMetadata,
   mergeDeployedGraphMetadata,
   projectDeployedGraph
 } from "./deployed.js";

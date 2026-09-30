@@ -52,6 +52,7 @@ function workspace() {
   for (const name of [
     "plugins.mjs",
     "libraries.mjs",
+    "module-entry.mjs",
     "version.mjs",
     "release-version.mjs"
   ]) {

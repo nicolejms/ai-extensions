@@ -41,6 +41,7 @@ const GUARD = "github.repository == 'radius-project/ai-extensions'";
 
 interface WorkflowStep {
   readonly name?: string;
+  readonly id?: string;
   readonly uses?: string;
   readonly run?: string;
   readonly if?: string;
@@ -419,6 +420,9 @@ describe("cloud-e2e-cleanup.yml", () => {
 
     expect(token?.with?.["permission-actions"]).toBe("write");
     expect(token?.with?.["permission-environments"]).toBe("write");
+    // Deleting a deployment record is a write, and the records outlive the
+    // environment that names them, so environment write alone is not enough.
+    expect(token?.with?.["permission-deployments"]).toBe("write");
     // cloud-e2e.yml mints its journey token with no permission inputs, so any
     // grant added to this installation widens that token too.
     expect(token?.with?.["permission-packages"]).toBeUndefined();
@@ -449,24 +453,87 @@ describe("cloud-e2e-cleanup.yml", () => {
       (step) =>
         step.name === "Delete stale Radius applications before recovery state"
     );
-    const protectedSteps = purge.filter((step) =>
+    const fallbackProtectedSteps = purge.filter((step) =>
       [
-        "Purge stale Entra identities",
-        "Purge stale GHCR deployment state",
+        "Purge leaked Entra service principals and applications",
+        "Purge stale GitHub deployment records",
         "Purge stale GitHub Environments",
-        "Purge stale fallback pull requests and branches",
-        "Reset an idle fixture repository to the pinned baseline"
+        "Purge stale workflow fallback pull requests and branches"
       ].includes(step.name ?? "")
+    );
+    const reset = purge.find(
+      (step) =>
+        step.name === "Reset the fixture default branch under the shared lease"
     );
 
     expect(radiusCleanup?.run).toContain(
       "gh workflow run delete-application.yml"
     );
     expect(radiusCleanup?.run).toContain('gh run watch "$run_id"');
-    for (const step of protectedSteps)
+    expect(fallbackProtectedSteps).toHaveLength(4);
+    for (const step of fallbackProtectedSteps) {
       expect(step.if).toContain(
         "steps.radius-app-cleanup.outcome == 'success'"
       );
+      expect(step.if).toContain(
+        "steps.cluster-workload-cleanup.outcome == 'success'"
+      );
+      expect(step.if).toContain(
+        "steps.shared-resource-cleanup.outcome == 'success'"
+      );
+    }
+    for (const prerequisite of [
+      "cluster-workload-cleanup",
+      "shared-resource-cleanup",
+      "entra-identity-cleanup",
+      "deployment-records-cleanup",
+      "environment-cleanup",
+      "stale-ghcr-state-cleanup",
+      "ghcr-state-cleanup",
+      "fallback-ref-cleanup"
+    ])
+      expect(reset?.if).toContain(`steps.${prerequisite}.outcome == 'success'`);
+  });
+
+  // A deployment record is linked to its environment by name, so deleting the
+  // environment strands the records rather than removing them. Purging them
+  // first means a failure here cannot leave a record no later sweep will
+  // recognize, and GitHub rejects deleting a record that is still active.
+  it("purges deployment records before the environments that name them", async () => {
+    const workflow = await parseWorkflow(CLEANUP_WORKFLOW);
+    const purge = steps(workflow.jobs?.purge);
+    const deploymentsIndex = purge.findIndex(
+      (step) => step.name === "Purge stale GitHub deployment records"
+    );
+    const environmentsIndex = purge.findIndex(
+      (step) => step.name === "Purge stale GitHub Environments"
+    );
+    const script = purge[deploymentsIndex]?.run ?? "";
+
+    expect(deploymentsIndex).toBeGreaterThanOrEqual(0);
+    expect(environmentsIndex).toBeGreaterThan(deploymentsIndex);
+    expect(script).toContain("selectExpiredDeployments");
+    expect(script.indexOf("-f state=inactive")).toBeLessThan(
+      script.indexOf("--method DELETE")
+    );
+  });
+
+  // Ordering alone is not enough: if the record purge fails, deleting the
+  // environment anyway strands exactly the records this step exists to remove.
+  it("holds back the environment purge when the record purge fails", async () => {
+    const workflow = await parseWorkflow(CLEANUP_WORKFLOW);
+    const purge = steps(workflow.jobs?.purge);
+    const deployments = purge.find(
+      (step) => step.name === "Purge stale GitHub deployment records"
+    );
+    const environments = purge.find(
+      (step) => step.name === "Purge stale GitHub Environments"
+    );
+
+    expect(deployments?.id).toBe("deployment-records-cleanup");
+    expect(environments?.if).toContain(
+      "steps.deployment-records-cleanup.outcome == 'success'"
+    );
   });
 
   it("deletes only fixture-linked private GHCR state after Radius cleanup", async () => {
@@ -476,6 +543,7 @@ describe("cloud-e2e-cleanup.yml", () => {
     );
     const script = stateCleanup?.run ?? "";
 
+    expect(stateCleanup?.id).toBe("stale-ghcr-state-cleanup");
     expect(stateCleanup?.if).toContain(
       "steps.radius-app-cleanup.outcome == 'success'"
     );
@@ -487,10 +555,13 @@ describe("cloud-e2e-cleanup.yml", () => {
       '[[ "$visibility" != "private" && "$visibility" != "internal" ]]'
     );
     expect(script).toContain(
-      '[[ "${linked_repository,,}" != "${FIXTURE_REPOSITORY,,}" ]]'
+      '[[ -n "$linked_repository" && "${linked_repository,,}" != "${FIXTURE_REPOSITORY,,}" ]]'
     );
     expect(script).toContain(
       'GH_TOKEN="$GH_PACKAGES_TOKEN" gh api --method DELETE "$package_path"'
+    );
+    expect(script).toContain(
+      "GHCR package $package_name for $environment is still readable after deletion"
     );
   });
 
@@ -519,9 +590,28 @@ describe("cloud-e2e-cleanup.yml", () => {
       '[[ "$visibility" != "private" && "$visibility" != "internal" ]]'
     );
     expect(script).toContain(
-      '[[ "${linked_repository,,}" != "${FIXTURE_REPOSITORY,,}" ]]'
+      '[[ -n "$linked_repository" && "${linked_repository,,}" != "${FIXTURE_REPOSITORY,,}" ]]'
     );
     expect(script).toContain('cutoff="$(date -u -d "$MAX_AGE_HOURS hours ago"');
+    expect(script).toContain(
+      "orphaned GHCR package $package_name is still readable after deletion"
+    );
+  });
+
+  it("verifies Entra application deletion and retries a missing object id by client id", async () => {
+    const workflow = await parseWorkflow(CLEANUP_WORKFLOW);
+    const identityCleanup = steps(workflow.jobs?.purge).find(
+      (step) =>
+        step.name === "Purge leaked Entra service principals and applications"
+    );
+    const script = identityCleanup?.run ?? "";
+
+    expect(script).toContain('az ad app delete --id "$id"');
+    expect(script).toContain('az ad app delete --id "$app_id"');
+    expect(script).toContain("Request_ResourceNotFound");
+    expect(script).toContain(
+      "application $id (appId $app_id) remained listed after deletion"
+    );
   });
 
   it("reclaims leaked cluster workloads with credentials for the shared cluster", async () => {

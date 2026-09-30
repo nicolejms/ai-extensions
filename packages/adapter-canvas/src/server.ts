@@ -20,8 +20,10 @@ import {
   fetchBicepFromRepo,
   fetchRecipePack,
   isKubernetesNamespace,
+  mergeDeployedGraphDisplayMetadata,
   mergeDeployedGraphMetadata,
   projectDeployedGraph,
+  projectSafeApplicationGraph,
   resolveRecipeOutputs,
   DEFAULT_STATE_ARCHIVE,
   OCI_STATE_BACKEND,
@@ -187,6 +189,8 @@ import {
   canResumeInput,
   requireInput,
   resumeAfterInput,
+  getAzureAppCreateContinuation,
+  setAzureAppCreateContinuation,
   setExecutionActive,
   announceOperationTerminal,
   shouldStop,
@@ -240,9 +244,7 @@ import {
   fetchRunLog,
   extractErrorLines,
   extractGitHubActionsStepLog,
-  extractRadDeployError,
   explainOidcEnterpriseClaim,
-  classifyDeployCloudAuthDrift,
   explainNoSubscriptions,
   explainRepoAccessForEnvSetup,
   isGitHubRateLimitError,
@@ -1031,7 +1033,9 @@ const azureAutoSetupRoutes = createAzureAutoSetupRoutes(
       report: (diagnostic) => operations.report?.(diagnostic),
       finish: (operation, state, options) => {
         finish(operation, state, options);
-      }
+      },
+      getAzureAppCreateContinuation,
+      setAzureAppCreateContinuation
     },
     progress: {
       enterStage: (operation, stage) => {
@@ -1394,6 +1398,7 @@ const graphsPlanningRoutes = createGraphsPlanningRoutes({
   buildDeployStatusMap,
   buildDeployMessageMap,
   deployStatusKeys,
+  mergeDeployedGraphDisplayMetadata,
   mergeDeployedGraphMetadata,
   projectDeployedGraph: (modeled, statusByKey) =>
     projectDeployedGraph(modeled as any[], statusByKey),
@@ -1568,8 +1573,8 @@ const environmentsRoutes = createEnvironmentsRoutes({
       );
     }
   },
-  getRunDetail: (repo, runId, executor) => getRunDetail(repo, runId, executor),
-  fetchRunLog: (repo, runId, executor) => fetchRunLog(repo, runId, executor),
+  getRunDetail,
+  fetchRunLog,
   extractErrorLines: (logText, max) => extractErrorLines(logText, max),
   extractGitHubActionsStepLog,
   explainOidcEnterpriseClaim,
@@ -3249,12 +3254,10 @@ const deployDispatchService = createDeployDispatchService({
 });
 
 const deployOutcomeService = createDeployOutcomeService({
+  projectSafeGraphResources: (graph) =>
+    canvasGraphResources(projectSafeApplicationGraph(graph).resources),
   settleDeployStatuses,
   fetchRunLog,
-  extractGitHubActionsStepLog,
-  explainOidcEnterpriseClaim,
-  extractRadDeployError: (logText) => extractRadDeployError(logText),
-  classifyDeployCloudAuthDrift,
   cloudAuthDriftKind: DEPLOY_CLOUD_AUTH_DRIFT_KIND,
   sleep: (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds)),
@@ -3347,15 +3350,6 @@ function ghOrThrow(args: string[], timeout = 12000): Promise<string> {
       else resolve((stdout || "").trim());
     });
   });
-}
-
-export function resolveGitHubEnvironmentCreateState(
-  result: Partial<CommandResult> | null | undefined
-): "created_candidate" | "reused" | null {
-  if (!result) return null;
-  if (result.code === 0 || result.code === "0") return "reused";
-  const detail = `${result.stderr || ""}\n${result.stdout || ""}`;
-  return /HTTP 404|Not Found|404\b/i.test(detail) ? "created_candidate" : null;
 }
 
 export interface CleanupGitHubContext {
