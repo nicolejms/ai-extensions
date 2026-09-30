@@ -1151,7 +1151,7 @@ packages:
     resolution: {integrity: sha512-E9+yEA+jsfaoxZcUHFzEqUrQcoNh2EwrPT5efIqkUPUwD5Ua2Li9BRWaYeRwvzvdLgTSVrre8oKNeyrfg7KkdQ==}
 
   '@xyflow/react@12.11.6':
-    resolution: {integrity: sha1-6UxtbZkQ5eT22XuabCVGSBe4VoU=}
+    resolution: {integrity: sha512-9XsEJNHjatKYndszKTF/bsU7FOP9dJ6V/EQwzy3oMdtqgBuUq7BjKSwkEo+C7s4qHstHQfwwoHA3E8QfpPxZZQ==}
     peerDependencies:
       '@types/react': '>=17'
       '@types/react-dom': '>=17'
@@ -1164,7 +1164,7 @@ packages:
         optional: true
 
   '@xyflow/system@0.0.82':
-    resolution: {integrity: sha1-TiEgEJDzCdghQYNKa/kOByuSnFc=}
+    resolution: {integrity: sha512-4DKnL3CGtCGLRSmgDqaajRVgeksMXq/Yw4wPfdMfm7JvdIiWHGzVYOfFUztiATwdBXZqUU6HhehwUdbV9G23PQ==}
 
   acorn-jsx@5.3.2:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
