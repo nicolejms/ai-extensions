@@ -28,7 +28,7 @@ function fakeGitHub(cfg: FakeConfig = {}): GitHub {
 const AZURE_PACK = `
 extension radius
 resource recipes 'Radius.Core/recipePacks@2025-08-01-preview' = {
-  name: 'azure-avm'
+  name: 'azure-aks'
   properties: {
     recipes: {
       'Radius.Data/mySqlDatabases': {
@@ -102,7 +102,7 @@ describe("fetchRecipePack", () => {
 
   it("reads the kubernetes default pack for aws and kubernetes providers", async () => {
     const KUBE_PACK = `
-resource defaultRecipePack 'Radius.Core/recipePacks@2025-08-01-preview' = {
+resource kubernetesRecipePack 'Radius.Core/recipePacks@2025-08-01-preview' = {
   name: 'default'
   properties: {
     recipes: {
@@ -114,7 +114,7 @@ resource defaultRecipePack 'Radius.Core/recipePacks@2025-08-01-preview' = {
   }
 }
 `;
-    // Both providers resolve to recipe-packs/kubernetes/default-recipepack.bicep.
+    // Both providers resolve to recipe-packs/kubernetes/default.bicep.
     expect(recipePackContentPath("aws")).toBe(
       recipePackContentPath("kubernetes")
     );
@@ -248,14 +248,13 @@ describe("resolveRecipeOutputs", () => {
         name: "rabbitMQ",
         resourceType: "Radius.Messaging/rabbitMQ",
         templateKind: "bicep",
-        templatePath:
-          "mcr.microsoft.com/bicep/avm/res/service-bus/namespace:0.16.2",
+        templatePath: "ghcr.io/radius-project/kube-recipes/rabbitmq:latest",
         concreteResources: [
           {
-            name: "namespace",
-            type: "Microsoft.ServiceBus/namespaces",
-            provider: "azure",
-            displayType: "Service Bus"
+            name: "rabbitmq",
+            type: "apps/Deployment",
+            provider: "kubernetes",
+            displayType: "Deployment"
           }
         ]
       }
@@ -268,9 +267,7 @@ describe("resolveRecipeOutputs", () => {
       "azure"
     );
     expect(resolved[0].recipe?.name).toBe("rabbitMQ");
-    expect(resolved[0].outputResources[0].type).toBe(
-      "Microsoft.ServiceBus/namespaces"
-    );
+    expect(resolved[0].outputResources[0].type).toBe("apps/Deployment");
   });
 
   it("produces no outputs when no recipe matches", async () => {

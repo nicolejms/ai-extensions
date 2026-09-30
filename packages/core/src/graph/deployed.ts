@@ -16,6 +16,11 @@
 // Pure: no shell/HTTP/DOM.
 
 import { stripAPIVersion } from "./model.js";
+import {
+  projectGraphConnectionMetadata,
+  projectGraphOutputMetadata,
+  projectGraphResourceMetadata
+} from "./appgraph.js";
 import { filterGraphVisualizationResources } from "./visualization.js";
 
 export type DeployStatus = "pending" | "in_progress" | "success" | "failed";
@@ -75,10 +80,83 @@ function deployedResources(value: unknown): any[] {
   return [];
 }
 
+function outputIdentity(output: Record<string, unknown>): {
+  id: string;
+  type: string;
+} {
+  return {
+    id: typeof output.id === "string" ? output.id.trim() : "",
+    type:
+      typeof output.type === "string" ?
+        stripAPIVersion(output.type.trim()).toLowerCase()
+      : ""
+  };
+}
+
+function outputDisplayType(value: unknown): string {
+  if (value === null || typeof value !== "object") return "";
+  const displayType = (value as { displayType?: unknown }).displayType;
+  return typeof displayType === "string" ? displayType.trim() : "";
+}
+
+function mergeOutputResources(
+  previousOutputs: Record<string, unknown>[],
+  deployed: Record<string, unknown>[]
+): any[] {
+  const previousById = new Map<string, unknown>();
+  const previousByType = new Map<string, unknown>();
+  for (const output of previousOutputs) {
+    const identity = outputIdentity(output);
+    if (identity.id && !previousById.has(identity.id)) {
+      previousById.set(identity.id, output);
+    }
+    if (
+      identity.type &&
+      outputDisplayType(output) &&
+      !previousByType.has(identity.type)
+    ) {
+      previousByType.set(identity.type, output);
+    }
+  }
+
+  return deployed.map((output) => {
+    const identity = outputIdentity(output);
+    const displayType =
+      outputDisplayType(output) ||
+      (identity.id ? outputDisplayType(previousById.get(identity.id)) : "") ||
+      (identity.type ?
+        outputDisplayType(previousByType.get(identity.type))
+      : "");
+    return {
+      ...output,
+      ...(displayType ? { displayType } : {})
+    };
+  });
+}
+
+function projectOutputDisplayMetadata(
+  value: Record<string, unknown>
+): Record<string, string> {
+  const type =
+    (
+      value !== null &&
+      typeof value === "object" &&
+      typeof (value as { type?: unknown }).type === "string"
+    ) ?
+      (value as { type: string }).type.trim()
+    : "";
+  const displayType = outputDisplayType(value);
+  return {
+    ...(type ? { type } : {}),
+    ...(displayType ? { displayType } : {})
+  };
+}
+
 /**
  * mergeDeployedGraphMetadata - enrich modeled parents with exact deployment
- * metadata without changing their topology. Parent ids are the producer's
- * authoritative linkage; names and types are never used to guess a match.
+ * metadata without changing their topology. Parent resources match only by
+ * exact id. Once a parent matches, nested outputs prefer exact output id and
+ * may fall back to normalized concrete type to retain a missing displayType.
  */
 export function mergeDeployedGraphMetadata(
   modeled: any[],
@@ -87,10 +165,13 @@ export function mergeDeployedGraphMetadata(
   if (!Array.isArray(modeled)) return [];
   const deployedById = new Map<string, any>();
   for (const resource of deployedResources(deployed)) {
-    const id = typeof resource?.id === "string" ? resource.id.trim() : "";
-    if (id && !deployedById.has(id)) deployedById.set(id, resource);
+    const projected = projectGraphResourceMetadata(resource);
+    const id = typeof projected?.id === "string" ? projected.id.trim() : "";
+    if (id && !deployedById.has(id)) deployedById.set(id, projected);
   }
-  return modeled.map((resource) => {
+  return modeled.flatMap((resource) => {
+    const projected = projectGraphResourceMetadata(resource);
+    if (!projected) return [];
     const id = typeof resource?.id === "string" ? resource.id.trim() : "";
     const metadata = id ? deployedById.get(id) : undefined;
     const outputs =
@@ -98,17 +179,85 @@ export function mergeDeployedGraphMetadata(
         Array.isArray(metadata?.outputResources) &&
         metadata.outputResources.length > 0
       ) ?
-        metadata.outputResources
+        mergeOutputResources(
+          projected.outputResources as Record<string, unknown>[],
+          metadata.outputResources as Record<string, unknown>[]
+        )
       : Array.isArray(resource?.outputResources) ? resource.outputResources
       : [];
-    return {
-      ...resource,
-      connections:
-        Array.isArray(resource?.connections) ?
-          resource.connections.map((connection: any) => ({ ...connection }))
-        : [],
-      outputResources: outputs.map((output: any) => ({ ...output }))
-    };
+    return [
+      {
+        ...projected,
+        connections:
+          Array.isArray(resource?.connections) ?
+            resource.connections
+              .map(projectGraphConnectionMetadata)
+              .filter(
+                (
+                  connection: Record<string, unknown> | null
+                ): connection is Record<string, unknown> => connection !== null
+              )
+          : [],
+        outputResources: outputs
+          .map(projectGraphOutputMetadata)
+          .filter(
+            (
+              output: Record<string, unknown> | null
+            ): output is Record<string, unknown> => output !== null
+          )
+      }
+    ];
+  });
+}
+
+/**
+ * mergeDeployedGraphDisplayMetadata - carry safe recipe presentation metadata
+ * from the exact deployment attempt onto the displayed graph. Parent resources
+ * match only by exact id. The merge copies only type and displayType, never
+ * planned ids, portal URLs, or other metadata for resources that may not exist.
+ */
+export function mergeDeployedGraphDisplayMetadata(
+  modeled: any[],
+  displaySource: unknown
+): any[] {
+  if (!Array.isArray(modeled)) return [];
+  const displayById = new Map<string, Record<string, unknown>>();
+  for (const resource of deployedResources(displaySource)) {
+    const projected = projectGraphResourceMetadata(resource);
+    const id = typeof projected?.id === "string" ? projected.id.trim() : "";
+    if (id && projected && !displayById.has(id)) {
+      displayById.set(id, projected);
+    }
+  }
+
+  return modeled.flatMap((resource) => {
+    const projected = projectGraphResourceMetadata(resource);
+    if (!projected) return [];
+    const id = typeof projected.id === "string" ? projected.id.trim() : "";
+    const display = id ? displayById.get(id) : undefined;
+    const existingOutputs = projected.outputResources as Record<
+      string,
+      unknown
+    >[];
+    const displayOutputs =
+      (display?.outputResources as Record<string, unknown>[] | undefined) ?? [];
+    const existingIdentities = existingOutputs.map(outputIdentity);
+    const unmatchedDisplayOutputs = displayOutputs.filter((output) => {
+      const identity = outputIdentity(output);
+      return !existingIdentities.some(
+        (existing) =>
+          (identity.id && identity.id === existing.id) ||
+          (identity.type && identity.type === existing.type)
+      );
+    });
+    const outputResources = [
+      ...mergeOutputResources(displayOutputs, existingOutputs),
+      ...unmatchedDisplayOutputs
+        .map(projectOutputDisplayMetadata)
+        .filter((output) => output.type || output.displayType)
+    ];
+
+    return [{ ...projected, outputResources }];
   });
 }
 
@@ -158,20 +307,17 @@ export function projectDeployedGraph(
     Map<string, DeployStatus> | Record<string, DeployStatus> = new Map()
 ): any[] {
   if (!Array.isArray(modeled)) return [];
-  const visible = filterGraphVisualizationResources(modeled);
-  return visible.map((resource: any) => ({
-    ...resource,
-    connections:
-      Array.isArray(resource?.connections) ?
-        resource.connections.map((c: any) => ({ ...c }))
-      : [],
-    outputResources:
-      Array.isArray(resource?.outputResources) ?
-        resource.outputResources.map((output: any) => ({ ...output }))
-      : [],
-    deployStatus:
-      lookupDeployStatus(resource, statusByKey) ||
-      resource?.deployStatus ||
-      "pending"
-  }));
+  const projected: Record<string, unknown>[] = [];
+  for (const resource of modeled) {
+    const safeResource = projectGraphResourceMetadata(resource);
+    if (!safeResource) continue;
+    projected.push({
+      ...safeResource,
+      deployStatus:
+        lookupDeployStatus(resource, statusByKey) ||
+        safeResource.deployStatus ||
+        "pending"
+    });
+  }
+  return filterGraphVisualizationResources(projected);
 }

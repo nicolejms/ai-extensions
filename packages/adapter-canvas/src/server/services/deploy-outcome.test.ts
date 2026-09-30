@@ -16,12 +16,10 @@ function dependencies(
   overrides: Partial<DeployOutcomeDependencies> = {}
 ): DeployOutcomeDependencies {
   return {
+    projectSafeGraphResources: (graph) =>
+      Array.isArray(graph) ? (graph as CanvasGraphResource[]) : [],
     settleDeployStatuses: () => {},
     fetchRunLog: () => Promise.resolve(null),
-    extractGitHubActionsStepLog: () => "",
-    explainOidcEnterpriseClaim: () => "",
-    extractRadDeployError: () => "",
-    classifyDeployCloudAuthDrift: () => "",
     cloudAuthDriftKind: "cloud-auth-drift",
     sleep: () => Promise.resolve(),
     now: () => 1_700_000_060_000,
@@ -93,12 +91,9 @@ function outcomeRequest(overrides: Partial<DeployOutcomeRequest> = {}): {
 
 describe("deploy outcome construction", () => {
   it.each([
+    "projectSafeGraphResources",
     "settleDeployStatuses",
     "fetchRunLog",
-    "extractGitHubActionsStepLog",
-    "explainOidcEnterpriseClaim",
-    "extractRadDeployError",
-    "classifyDeployCloudAuthDrift",
     "sleep",
     "now"
   ] as const)("refuses to construct without %s", (name) => {
@@ -133,6 +128,7 @@ describe("deploy outcome on success", () => {
       statusReader: statusReader([{ graph: [{ id: "r1" }], status: "ok" }]),
       deployStepStartedAt: 1_700_000_000_000
     });
+
     const settled: unknown[] = [];
     const service = createDeployOutcomeService(
       dependencies({
@@ -166,6 +162,54 @@ describe("deploy outcome on success", () => {
     );
     expect(logs).toContain(
       "Click on deployed resources to view them in the Azure Portal."
+    );
+  });
+
+  it("projects a published graph before saving it in shared state", async () => {
+    const sentinel = "fixture-private-field";
+    const { request, state } = outcomeRequest({
+      statusReader: statusReader([
+        {
+          graph: [{ id: "r1", properties: { privateField: sentinel } }],
+          status: "ok"
+        }
+      ])
+    });
+    const service = createDeployOutcomeService(
+      dependencies({
+        projectSafeGraphResources: () => [{ id: "r1" }]
+      })
+    );
+
+    await service.settle(request);
+
+    expect(state.deployedGraph).toEqual([{ id: "r1" }]);
+    expect(JSON.stringify(state)).not.toContain(sentinel);
+  });
+
+  it("treats an unsafe published graph as malformed without retaining its value", async () => {
+    const sentinel = "fixture-private-field";
+    const { request, logs, state } = outcomeRequest({
+      statusReader: statusReader([
+        { graph: [{ id: "unsafe" }], status: "ok" },
+        { graph: [{ id: "unsafe" }], status: "ok" },
+        { graph: [{ id: "unsafe" }], status: "ok" }
+      ])
+    });
+    const service = createDeployOutcomeService(
+      dependencies({
+        projectSafeGraphResources: () => {
+          throw new Error(`unsafe graph: ${sentinel}`);
+        }
+      })
+    );
+
+    await service.settle(request);
+
+    expect(state.deployedGraph).toBeUndefined();
+    expect(JSON.stringify({ logs, state })).not.toContain(sentinel);
+    expect(logs).toContain(
+      "  ⚠ The deploy status artifact was found but could not be parsed. Continuing."
     );
   });
 
@@ -323,9 +367,7 @@ describe("deploy outcome on failure", () => {
     });
     const service = createDeployOutcomeService(
       dependencies({
-        fetchRunLog: () => Promise.resolve("run log text"),
-        extractRadDeployError: (text) =>
-          text === "run log text" ? "Error: {\n  code: Conflict\n}" : ""
+        fetchRunLog: () => Promise.resolve("Error: {\n  code: Conflict\n}")
       })
     );
 
@@ -354,31 +396,22 @@ describe("deploy outcome on failure", () => {
 
   it("prefixes the OIDC enterprise-claim explanation when the Azure login was rejected", async () => {
     const { request, state } = outcomeRequest({ conclusion: "failure" });
-    const stepLogs: [string | null | undefined, string][] = [];
     const service = createDeployOutcomeService(
       dependencies({
-        fetchRunLog: () => Promise.resolve("AADSTS7002381"),
-        extractGitHubActionsStepLog: (text, step) => {
-          stepLogs.push([text, step]);
-          return "azure login log";
-        },
-        explainOidcEnterpriseClaim: (text) =>
-          text === "azure login log" ? "Enterprise claim missing." : ""
+        fetchRunLog: () =>
+          Promise.resolve(
+            "deploy\tAzure Login (OIDC)\t2026-01-01 AADSTS7002381"
+          )
       })
     );
 
     await service.settle(request);
 
-    expect(stepLogs).toEqual([["AADSTS7002381", "Azure Login (OIDC)"]]);
-    expect(state.deployError).toBe(
-      [
-        "Enterprise claim missing.",
-        "",
-        "\u2014 raw error \u2014",
-        "Deployment failed (failure).",
-        "",
-        "View the full run: https://github.com/acme/widgets/actions/runs/42"
-      ].join("\n")
+    expect(state.deployError).toContain(
+      'Azure Login (OIDC) was rejected by the target Azure tenant over the GitHub OIDC "enterprise" claim.'
+    );
+    expect(state.deployError).toContain(
+      "\u2014 raw error \u2014\nDeployment failed (failure)."
     );
   });
 
@@ -397,9 +430,8 @@ describe("deploy outcome on failure", () => {
       dependencies({
         fetchRunLog: () => {
           statusWhenErrorAssembled = state.deployStatus;
-          return Promise.resolve("run log text");
-        },
-        extractRadDeployError: () => "Error: quota exceeded"
+          return Promise.resolve("Error: quota exceeded");
+        }
       })
     );
 
@@ -436,7 +468,6 @@ describe("deploy outcome on failure", () => {
     // Exception 5.2: classifier matched, so the readable drift lead is prefixed
     // to describeFailure's message and the kind is stamped so the repair guard
     // leaves it for the user to re-verify.
-    const driftInputs: unknown[] = [];
     const { request, state } = outcomeRequest({
       conclusion: "failure",
       provider: "aws",
@@ -446,28 +477,14 @@ describe("deploy outcome on failure", () => {
         { name: "Run rad commands", conclusion: "skipped" }
       ]
     });
-    const service = createDeployOutcomeService(
-      dependencies({
-        classifyDeployCloudAuthDrift: (input) => {
-          driftInputs.push(input);
-          return "Cloud authentication failed. Re-verify.";
-        }
-      })
-    );
+    const service = createDeployOutcomeService(dependencies());
 
     await service.settle(request);
 
-    expect(driftInputs).toEqual([
-      {
-        provider: "aws",
-        resourcesTouched: false,
-        failedStepNames: ["Configure AWS Credentials"]
-      }
-    ]);
     expect(state.deployStatus).toBe("failed");
     expect(state.deployErrorKind).toBe("cloud-auth-drift");
     expect(state.deployError).toContain(
-      "Cloud authentication failed. Re-verify."
+      "Cloud authentication or authorization failed before any resource was deployed."
     );
     expect(state.deployError).toContain(
       "View the full run: https://github.com/acme/widgets/actions/runs/42"
@@ -475,21 +492,25 @@ describe("deploy outcome on failure", () => {
   });
 
   it("prefixes the auth-drift message even when describeFailure throws", async () => {
-    const { request, state } = outcomeRequest({ conclusion: "failure" });
+    const { request, state } = outcomeRequest({
+      conclusion: "failure",
+      steps: [{ name: "Azure Login (OIDC)", conclusion: "failure" }]
+    });
     const service = createDeployOutcomeService(
       dependencies({
-        fetchRunLog: () => Promise.reject(new Error("network down")),
-        classifyDeployCloudAuthDrift: () => "Cloud auth drift lead."
+        fetchRunLog: () => Promise.reject(new Error("network down"))
       })
     );
 
     await service.settle(request);
 
     expect(state.deployErrorKind).toBe("cloud-auth-drift");
-    expect(state.deployError).toBe(
-      "Cloud auth drift lead.\n\n" +
-        "Deployment failed (failure). The failure details could not be read; " +
+    expect(state.deployError).toContain(
+      "Deployment failed (failure). The failure details could not be read; " +
         "see the full run: https://github.com/acme/widgets/actions/runs/42."
+    );
+    expect(state.deployError).toMatch(
+      /^Cloud authentication or authorization failed/
     );
   });
 
@@ -500,7 +521,6 @@ describe("deploy outcome on failure", () => {
       // timed out at the cloud-login step touched no resource, but that is not
       // the user's credentials drifting, so the classifier must not run and the
       // kind must stay unset.
-      let classifierCalls = 0;
       const { request, state } = outcomeRequest({
         conclusion,
         provider: "aws",
@@ -510,22 +530,14 @@ describe("deploy outcome on failure", () => {
           { name: "Run rad commands", conclusion: "skipped" }
         ]
       });
-      const service = createDeployOutcomeService(
-        dependencies({
-          classifyDeployCloudAuthDrift: () => {
-            classifierCalls += 1;
-            return "Cloud authentication failed. Re-verify.";
-          }
-        })
-      );
+      const service = createDeployOutcomeService(dependencies());
 
       await service.settle(request);
 
-      expect(classifierCalls).toBe(0);
       expect(state.deployStatus).toBe("failed");
       expect(state.deployErrorKind).toBeUndefined();
       expect(state.deployError).not.toContain(
-        "Cloud authentication failed. Re-verify."
+        "Cloud authentication or authorization failed"
       );
     }
   );
@@ -580,7 +592,9 @@ describe("deploy outcome on failure", () => {
       })
     });
     const service = createDeployOutcomeService(
-      dependencies({ extractRadDeployError: () => "Error: { code: Boom }" })
+      dependencies({
+        fetchRunLog: () => Promise.resolve("Error: { code: Boom }")
+      })
     );
 
     await service.settle(request);
@@ -619,8 +633,7 @@ describe("deploy outcome on failure", () => {
 
 describe("deploy outcome settles red nodes with an explanation (Exception 5.1)", () => {
   it("keeps full failure diagnostics while bounding copies on graph nodes", async () => {
-    const radiusError =
-      "Error: recipe failed\n" + "quota details\n".repeat(100);
+    const radiusError = "Error: {\n" + "quota details\n".repeat(100) + "}";
     const resources: CanvasGraphResource[] = [
       { id: "r1", name: "db", deployStatus: "pending" }
     ];
@@ -630,7 +643,7 @@ describe("deploy outcome settles red nodes with an explanation (Exception 5.1)",
     });
     const service = createDeployOutcomeService(
       dependencies({
-        extractRadDeployError: () => radiusError,
+        fetchRunLog: () => Promise.resolve(radiusError),
         settleDeployStatuses
       })
     );
@@ -659,8 +672,7 @@ describe("deploy outcome settles red nodes with an explanation (Exception 5.1)",
     });
     const service = createDeployOutcomeService(
       dependencies({
-        fetchRunLog: () => Promise.resolve("run log text"),
-        extractRadDeployError: () => "Error: recipe quota exceeded",
+        fetchRunLog: () => Promise.resolve("Error: recipe quota exceeded"),
         settleDeployStatuses: (_resources, conclusion, radiusError) => {
           settled.push([conclusion, radiusError]);
         }

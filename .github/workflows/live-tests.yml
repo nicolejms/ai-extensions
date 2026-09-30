@@ -80,7 +80,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -103,7 +103,8 @@ jobs:
           # them through the authenticated GitHub contents API rather than
           # anonymous raw.githubusercontent.com.
           GITHUB_TOKEN: ${{ github.token }}
-        run: pnpm test -- src/workflows/workflow-yaml.live.test.ts src/workflows/oidc-environment-contract.live.test.ts
+        working-directory: packages/core
+        run: pnpm exec vitest run src/workflows/workflow-yaml.live.test.ts src/workflows/oidc-environment-contract.live.test.ts
 
       - name: Verify live contrib workflow consumers
         shell: bash
@@ -135,7 +136,7 @@ jobs:
           persist-credentials: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0

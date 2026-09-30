@@ -13,10 +13,11 @@ import {
   buildSourceUrl,
   radiusDeployBadgeKind,
   radiusDeployBadgeSvg,
-  radiusFormatResolvedTypeLabel,
   radiusFormatTypeLabel,
   radiusIsManagedClusterResource,
-  radiusResolveIcon,
+  radiusResolveIconSource,
+  radiusResolvedConcreteType,
+  radiusResolvedDisplayLabel,
   radiusSelectResolvedResource,
   srcLineFromRef,
   srcPathFromRef
@@ -110,8 +111,10 @@ export interface GraphNodeData {
   borderStyle?: string;
   bgColor: string;
   icon: string;
+  iconMonochrome?: boolean;
   nodeName: string;
   typeLabel: string;
+  concreteType: string;
   codeRef: string;
   sourceUrl: string;
   sourceBranch?: string;
@@ -371,30 +374,33 @@ export function buildGraph(
   for (const [resourceIndex, resource] of visibleResources.entries()) {
     const id = resourceId(resource, resourceIndex);
     const colors = nodeColors(settings, resource);
-    // Planned and deploying graphs share the same shape: the modeled resource
-    // keeps its identity (name, icon) and only the type label changes to the
-    // concrete type the recipe pack resolves to.
+    // Planned and deploying graphs preserve the modeled resource's identity and
+    // topology. The selected output supplies a friendly label when available
+    // and retains its exact concrete type for diagnostics.
     const resolved =
       settings.resolvedMode ?
         radiusSelectResolvedResource(resource, ownedOutputIds, id)
       : null;
     const shortType =
       resolved ?
-        radiusFormatResolvedTypeLabel(resolved.type || resolved.displayType)
+        radiusResolvedDisplayLabel(resolved)
       : radiusFormatTypeLabel(resource.type);
     const sourceBranch =
       settings.diffMode && resource.diffStatus === "removed" ?
         settings.baseBranch
       : settings.branch;
     const badgeKind = radiusDeployBadgeKind(resource.deployStatus);
+    const resourceIcon = radiusResolveIconSource(resource);
     pushNode(id, {
       borderColor: colors.border,
       borderWidth: 2.5,
       borderStyle: settings.plannedMode ? "dashed" : "solid",
       bgColor: colors.bg,
-      icon: radiusResolveIcon(resource),
+      icon: resourceIcon.src,
+      iconMonochrome: resourceIcon.monochrome,
       nodeName: resource.name || id,
       typeLabel: shortType,
+      concreteType: radiusResolvedConcreteType(resolved),
       codeRef: resource.codeReference || "",
       sourceUrl: buildSourceUrl(
         settings.repoUrl,
@@ -460,15 +466,18 @@ export function buildGraph(
         id + "/output/" + index + "/" + (output.name || `resource-${index}`);
       const outputLabel =
         output.displayType || output.type || output.name || "Resource";
+      const outputIcon = radiusResolveIconSource(output);
       pushNode(outputId, {
         // Output child nodes only appear in the modeled/diff graphs, so they
         // always render as neutral grey.
         borderColor: "var(--rad-edge-muted)",
         borderWidth: 2.5,
         bgColor: "var(--rad-bg-subtle)",
-        icon: radiusResolveIcon(output),
+        icon: outputIcon.src,
+        iconMonochrome: outputIcon.monochrome,
         nodeName: output.name || outputLabel,
         typeLabel: outputLabel,
+        concreteType: radiusResolvedConcreteType(output),
         codeRef: "",
         sourceUrl: "",
         srcPath: "",

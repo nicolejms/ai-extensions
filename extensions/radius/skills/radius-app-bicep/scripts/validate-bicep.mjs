@@ -17,8 +17,14 @@
 // workspace packages do not exist; app-bicep-check.test.ts asserts the copies
 // agree.
 
-import { spawnSync } from "node:child_process";
-import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import {
+  existsSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -300,11 +306,20 @@ function repairHint(ruleId, text) {
 function printDiagnostic(result) {
   const physical = result.locations?.[0]?.physicalLocation;
   const source = physical?.artifactLocation?.uri;
-  const line = physical?.region?.startLine;
+  const region = physical?.region;
+  const line = region?.startLine;
+  // Bicep 0.42.1, 0.44.1, and 0.47.16 put the 1-based display column in `charOffset`
+  // instead of SARIF's `startColumn`. Prefer the standard field when present.
+  const column = region?.startColumn ?? region?.charOffset;
+  const hasLine = Number.isSafeInteger(line) && line > 0;
+  const hasColumn = Number.isSafeInteger(column) && column > 0;
   let location = "";
   if (typeof source === "string") {
-    location = `${source}${Number.isInteger(line) ? `:${line}` : ""}`;
-  } else if (Number.isInteger(line)) {
+    location = `${source}${hasLine ? `:${line}` : ""}`;
+    if (hasLine && hasColumn) {
+      location += `:${column}`;
+    }
+  } else if (hasLine) {
     location = `line ${line}`;
   }
   const level = typeof result.level === "string" ? result.level : "warning";
@@ -685,6 +700,14 @@ function emittedAtOrAfter(referenced, name) {
   );
 }
 
+function emittedBefore(referenced, name) {
+  return (
+    referenced < name &&
+    referenced.toUpperCase() < name.toUpperCase() &&
+    referenced.toLowerCase() < name.toLowerCase()
+  );
+}
+
 function plainEnvironmentValues(env) {
   const values = new Map();
   for (const [name, entry] of Object.entries(env)) {
@@ -698,6 +721,90 @@ function plainEnvironmentValues(env) {
     }
   }
   return values;
+}
+
+// Any expression whose outermost call is reference(...) and whose result is
+// .properties.secrets.name is a managed Secret name. The argument may select a
+// literal resource or a loop instance through format(...). Expressions wrapped
+// in another operation remain outside this deliberately narrow match.
+//
+// This assumes the predefined Radius producer semantics documented by the
+// skill. A future expression parser could identify a direct producer's type and
+// distinguish custom Radius.Resources/* properties without broadening this rule.
+const MANAGED_SECRET_NAME_REFERENCE =
+  /^\[reference\(.+\)\.properties\.secrets\.name\]$/u;
+
+// resolveTemplateString follows whole string parameters and the one supported
+// format pass-through. It deliberately does not trace object properties, module
+// outputs, variables, or general ARM expression data flow.
+function checkConnectionSources(
+  template,
+  app,
+  parentPath = "",
+  parameterValues = new Map()
+) {
+  let failed = false;
+  for (const [symbol, resource] of Object.entries(template.resources ?? {})) {
+    const resourcePath = parentPath ? `${parentPath}.${symbol}` : symbol;
+    if (resource?.type === "Microsoft.Resources/deployments") {
+      const nestedTemplate = resource?.properties?.template;
+      if (isPlainObject(nestedTemplate)) {
+        const nestedParameterValues = new Map();
+        for (const [name, argument] of Object.entries(
+          resource?.properties?.parameters ?? {}
+        )) {
+          nestedParameterValues.set(
+            name,
+            resolveTemplateString(argument?.value, template, parameterValues)
+          );
+        }
+        if (
+          checkConnectionSources(
+            nestedTemplate,
+            app,
+            resourcePath,
+            nestedParameterValues
+          )
+        ) {
+          failed = true;
+        }
+      }
+      continue;
+    }
+    // #676 is scoped to the container connection projection that consumes
+    // producer IDs. Other Radius resource types remain outside this check.
+    if (
+      typeof resource?.type !== "string" ||
+      !resource.type.startsWith("Radius.Compute/containers@")
+    ) {
+      continue;
+    }
+    const connections = resource?.properties?.properties?.connections;
+    if (!isPlainObject(connections)) {
+      continue;
+    }
+    for (const [name, connection] of Object.entries(connections)) {
+      if (!isPlainObject(connection)) {
+        continue;
+      }
+      const source = resolveTemplateString(
+        connection.source,
+        template,
+        parameterValues
+      );
+      if (
+        typeof source !== "string" ||
+        !MANAGED_SECRET_NAME_REFERENCE.test(source)
+      ) {
+        continue;
+      }
+      report(
+        `${app}: error connection-source: ${resourcePath}.properties.connections.${name}.source: this Radius container connection uses a managed Kubernetes Secret name; use the producer resource ID (<producer>.id) as the connection source instead. Use <producer>.properties.secrets.name only as valueFrom.secretKeyRef.secretName for an explicit Kubernetes environment binding.`
+      );
+      failed = true;
+    }
+  }
+  return failed;
 }
 
 function checkRuntimeVariableExpansion(
@@ -785,6 +892,216 @@ function checkRuntimeVariableExpansion(
           );
           failed = true;
         }
+      }
+    }
+  }
+  return failed;
+}
+
+// A Recipe-managed secret key can name an aggregate representation while an
+// app-native variable names one of its parts. Those values are both strings, so
+// Bicep accepts the assignment even though the application parser receives the
+// wrong syntax. The source-reading rules remain authoritative; this check is a
+// conservative backstop for the contradiction the compiled model itself proves.
+//
+// It intentionally applies only to a `properties.secrets.name` reference. An
+// authored Secret may use any key chosen to match the application contract, so
+// its key name alone says nothing about the value's representation.
+const MANAGED_SECRET_REFERENCE =
+  /^\[reference\('([^']+)'(?:,[^)]*)?\)\.properties\.secrets\.name\]$/u;
+const AGGREGATE_SECRET_KEYS = new Set([
+  "connectionstring",
+  "dsn",
+  "uri",
+  "url"
+]);
+// Both vocabularies are deliberately exact and conservative. They do not infer
+// embedded words such as `primaryConnectionString` or undelimited names such as
+// `REDISADDR`; adding one requires evidence that it identifies the same contract
+// across generated models rather than merely containing a familiar substring.
+const ADDRESS_PART_TOKENS = new Set([
+  "addr",
+  "address",
+  "host",
+  "hostname",
+  "port"
+]);
+
+function configurationNameTokens(name) {
+  if (typeof name !== "string") {
+    return [];
+  }
+  return name
+    .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter((token) => token !== "");
+}
+
+function managedAggregateSecretFinding(entry, template, parameterValues) {
+  if (!isPlainObject(entry) || !isPlainObject(entry.valueFrom)) {
+    return null;
+  }
+  const reference = entry.valueFrom.secretKeyRef;
+  if (!isPlainObject(reference)) {
+    return null;
+  }
+  const secretName = resolveTemplateString(
+    reference.secretName,
+    template,
+    parameterValues
+  );
+  const key = resolveTemplateString(reference.key, template, parameterValues);
+  if (
+    typeof secretName !== "string" ||
+    MANAGED_SECRET_REFERENCE.exec(secretName) === null ||
+    typeof key !== "string"
+  ) {
+    return null;
+  }
+  const secretKey = key.toLowerCase().replace(/[^a-z0-9]/gu, "");
+  if (!AGGREGATE_SECRET_KEYS.has(secretKey)) {
+    return null;
+  }
+  return {
+    key,
+    secretName
+  };
+}
+
+function managedAggregateSecretSource(
+  name,
+  env,
+  template,
+  parameterValues,
+  visited = new Set()
+) {
+  if (visited.has(name)) {
+    return null;
+  }
+  const entry = env[name];
+  const direct = managedAggregateSecretFinding(
+    entry,
+    template,
+    parameterValues
+  );
+  if (direct !== null) {
+    return { ...direct, helpers: [], passThrough: true };
+  }
+  if (!isPlainObject(entry) || !("value" in entry)) {
+    return null;
+  }
+  const value = resolveTemplateString(entry.value, template, parameterValues);
+  if (typeof value !== "string") {
+    return null;
+  }
+  const nextVisited = new Set(visited);
+  nextVisited.add(name);
+  for (const helper of expandedVariableNames(value)) {
+    const helperEntry = env[helper];
+    if (
+      isPlainObject(helperEntry) &&
+      "value" in helperEntry &&
+      !emittedBefore(helper, name)
+    ) {
+      continue;
+    }
+    const finding = managedAggregateSecretSource(
+      helper,
+      env,
+      template,
+      parameterValues,
+      nextVisited
+    );
+    if (finding !== null) {
+      return {
+        ...finding,
+        helpers: [helper, ...finding.helpers],
+        passThrough: finding.passThrough && value.trim() === `$(${helper})`
+      };
+    }
+  }
+  return null;
+}
+
+function aggregateSecretAliasFinding(name, env, template, parameterValues) {
+  const targetTokens = configurationNameTokens(name);
+  if (!targetTokens.some((token) => ADDRESS_PART_TOKENS.has(token))) {
+    return null;
+  }
+  return managedAggregateSecretSource(name, env, template, parameterValues);
+}
+
+function checkAggregateSecretAliases(
+  template,
+  app,
+  parentPath = "",
+  parameterValues = new Map()
+) {
+  let failed = false;
+  for (const [symbol, resource] of Object.entries(template.resources ?? {})) {
+    const resourcePath = parentPath ? `${parentPath}.${symbol}` : symbol;
+    if (resource?.type === "Microsoft.Resources/deployments") {
+      const nestedTemplate = resource?.properties?.template;
+      if (isPlainObject(nestedTemplate)) {
+        const nestedParameterValues = new Map();
+        for (const [name, argument] of Object.entries(
+          resource?.properties?.parameters ?? {}
+        )) {
+          nestedParameterValues.set(
+            name,
+            resolveTemplateString(argument?.value, template, parameterValues)
+          );
+        }
+        if (
+          checkAggregateSecretAliases(
+            nestedTemplate,
+            app,
+            resourcePath,
+            nestedParameterValues
+          )
+        ) {
+          failed = true;
+        }
+      }
+      continue;
+    }
+    if (
+      typeof resource?.type !== "string" ||
+      !resource.type.startsWith("Radius.Compute/containers@")
+    ) {
+      continue;
+    }
+    const containers = resource?.properties?.properties?.containers;
+    if (!isPlainObject(containers)) {
+      continue;
+    }
+    for (const [containerKey, container] of Object.entries(containers)) {
+      if (!isPlainObject(container) || !isPlainObject(container.env)) {
+        continue;
+      }
+      for (const name of Object.keys(container.env)) {
+        const finding = aggregateSecretAliasFinding(
+          name,
+          container.env,
+          template,
+          parameterValues
+        );
+        if (finding === null) {
+          continue;
+        }
+        const binding =
+          finding.helpers.length === 0 ?
+            ""
+          : ` through helper chain ${finding.helpers.map((helper) => JSON.stringify(helper)).join(" -> ")}`;
+        const transformationAdvice =
+          finding.passThrough ?
+            "A pass-through helper does not convert the value."
+          : "Embedding the aggregate in a larger value does not prove that the resulting syntax is compatible.";
+        report(
+          `${app}: error aggregate-secret-alias: ${resourcePath}.properties.containers.${containerKey}.env.${name}: Recipe-managed secret key ${JSON.stringify(finding.key)} is an aggregate value${binding}, but ${JSON.stringify(name)} names an address part. The model cannot establish that the application parser accepts the aggregate syntax. Trace the setting through checked-in source and either bind a matching aggregate input, perform a real runtime transformation from schema-declared parts, or stop without publishing the model. ${transformationAdvice} If the fixed address-shaped name itself accepts the aggregate syntax, use another source-supported aggregate input or report this conservative checker limitation rather than renaming either side.`
+        );
+        failed = true;
       }
     }
   }
@@ -1006,22 +1323,127 @@ const bicep = path.join(
   executable
 );
 
+// Whether every Bicep security rule runs for the files this compile reads. A
+// model that does not exist has nothing to inspect, and the compile reports it
+// exactly as it did before this check existed. Never rejects, so the compile
+// running alongside it is always awaited rather than left behind.
+async function inspectCompiledFiles(securityRules, app, staged) {
+  if (!existsSync(app)) {
+    return { findings: [], unavailable: null };
+  }
+  try {
+    const references = await securityRules.requestFileReferences(bicep, app);
+    if (references.error !== undefined) {
+      return { findings: [], unavailable: references.error };
+    }
+    return securityRules.inspectSecurityRules(references.filePaths, {
+      stagingDir: staged ? path.dirname(app) : null
+    });
+  } catch (error) {
+    return { findings: [], unavailable: error.message };
+  }
+}
+
+const COMPILE_TIMEOUT_MS = 120_000;
+const COMPILE_OUTPUT_LIMIT = 16 * 1024 * 1024;
+
+// Compiles the model in a child process, resolving with the fields a
+// spawnSync() result carries: `error` when Bicep could not be started, ran
+// past the timeout, or wrote more output than the limit, and otherwise its
+// exit status, signal, and output. Asynchronous so the security-rule
+// inspection, which needs its own Bicep process, runs alongside it.
+function compileModel(app) {
+  return new Promise((resolve) => {
+    const output = { stdout: [], stderr: [] };
+    const sizes = { stdout: 0, stderr: 0 };
+    let error = null;
+    let settled = false;
+    let timer;
+    const finish = (status, signal) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({
+        error,
+        status,
+        signal,
+        stdout: Buffer.concat(output.stdout).toString("utf8"),
+        stderr: Buffer.concat(output.stderr).toString("utf8")
+      });
+    };
+    const child = spawn(
+      bicep,
+      ["build", app, "--diagnostics-format", "sarif", "--stdout"],
+      {
+        cwd: path.dirname(app),
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true
+      }
+    );
+    const stop = (reason) => {
+      error ??= reason;
+      child.kill();
+    };
+    timer = setTimeout(() => {
+      stop(
+        new Error(
+          `Bicep did not finish compiling within ${COMPILE_TIMEOUT_MS} ms.`
+        )
+      );
+    }, COMPILE_TIMEOUT_MS);
+    for (const stream of ["stdout", "stderr"]) {
+      child[stream].on("data", (chunk) => {
+        sizes[stream] += chunk.length;
+        if (sizes[stream] > COMPILE_OUTPUT_LIMIT) {
+          stop(
+            new Error(
+              `Bicep wrote more than ${COMPILE_OUTPUT_LIMIT} bytes to ${stream}.`
+            )
+          );
+          return;
+        }
+        output[stream].push(chunk);
+      });
+    }
+    child.on("error", (reason) => {
+      error ??= reason;
+      // A process that never started emits no exit to wait for.
+      if (child.pid === undefined) finish(null, null);
+    });
+    child.on("close", finish);
+  });
+}
+
 // Compiles the model and distinguishes model diagnostics from a check that
 // could not produce a reliable verdict. The budget wraps it rather than living
 // inside it.
-function check(app, staged) {
-  const compiled = spawnSync(
-    bicep,
-    ["build", app, "--diagnostics-format", "sarif", "--stdout"],
-    {
-      cwd: path.dirname(app),
-      encoding: "utf8",
-      maxBuffer: 16 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"],
-      timeout: 120_000,
-      windowsHide: true
-    }
-  );
+async function check(app, staged) {
+  // Loaded before anything is spawned rather than imported statically, so an
+  // installation missing the sibling module reaches the catch below main() and
+  // reports the check as unavailable (exit 2) instead of failing to load
+  // (exit 1), without leaving a compile running.
+  const securityRuleModule = await import("./bicep-security-rules.mjs");
+  // A security rule that was turned off reports nothing, so a clean compile is
+  // only evidence once the rules are known to have run. The inspection runs
+  // alongside the compile, and its findings are reported first; a finding
+  // still lets the compile's own diagnostics through, so one attempt reports
+  // everything the model has to fix.
+  const [securityRules, compiled] = await Promise.all([
+    inspectCompiledFiles(securityRuleModule, app, staged),
+    compileModel(app)
+  ]);
+  securityRules.findings.forEach(report);
+  if (securityRules.unavailable !== null) {
+    report(
+      `${app}: error checker-unavailable: whether the Bicep security rules run could not be established: ${securityRules.unavailable}. ` +
+        "No model-policy verdict was produced. Abort the staged run: do not retry validation, do not modify the current model, " +
+        "do not start another modeling run, do not write the origin record, and do not publish the run. " +
+        "Report this exact failure to the user and say that no application definition was written."
+    );
+    return EXIT_CHECK_UNAVAILABLE;
+  }
+  const securityRuleDisabled = securityRules.findings.length > 0;
+
   if (compiled.error) {
     report(compiled.error.message);
     return EXIT_CHECK_UNAVAILABLE;
@@ -1077,7 +1499,12 @@ function check(app, staged) {
 
   const invalidBuildSource = checkContainerImageBuildSources(template, app);
   const invalidSourceReference = checkSourceCodeReferences(template, app);
+  const invalidConnectionSource = checkConnectionSources(template, app);
   const unresolvedRuntimeVariable = checkRuntimeVariableExpansion(
+    template,
+    app
+  );
+  const incompatibleAggregateSecretAlias = checkAggregateSecretAliases(
     template,
     app
   );
@@ -1087,21 +1514,24 @@ function check(app, staged) {
     resolvedTypes
   );
   return (
-      compilerFailed ||
+      securityRuleDisabled ||
+        compilerFailed ||
         invalidBuildSource ||
         invalidSourceReference ||
+        invalidConnectionSource ||
         unresolvedRuntimeVariable ||
+        incompatibleAggregateSecretAlias ||
         misplacedSecureParameter
     ) ?
       EXIT_MODEL_INVALID
     : EXIT_SUCCESS;
 }
 
-function main() {
+async function main() {
   const app = path.resolve(process.argv[2] || ".radius/app.bicep");
   const run = readRunRecord(app);
   if (run === null) {
-    return check(app, false);
+    return await check(app, false);
   }
 
   // Fail closed: a staged run whose record cannot be parsed or read has no
@@ -1127,7 +1557,7 @@ function main() {
     return EXIT_CHECK_UNAVAILABLE;
   }
 
-  const status = check(app, true);
+  const status = await check(app, true);
   // An unavailable check produced no new model verdict, so keep the last model
   // failure for comparison with the next completed validation. Success clears
   // it because there is no longer a failed model to compare.
@@ -1169,7 +1599,7 @@ function main() {
 }
 
 try {
-  process.exitCode = main();
+  process.exitCode = await main();
 } catch (error) {
   console.error(error);
   process.exitCode = EXIT_CHECK_UNAVAILABLE;

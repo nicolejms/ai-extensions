@@ -15,13 +15,39 @@ export default defineConfig({
         "packages/*/src/**/*.ts",
         "packages/*/src/**/*.mjs",
         "extensions/radius/skills/radius-app-bicep/scripts/show-radius-type.mjs",
+        "extensions/radius/skills/radius-app-bicep/scripts/bicep-security-rules.mjs",
         "extensions/radius/skills/radius-app-bicep/scripts/radius-recipe-pack.mjs",
         "extensions/radius/skills/radius-app-bicep/scripts/radius-type-schema.mjs"
       ],
       exclude: ["packages/*/src/**/*.test.ts"],
       thresholds: {
         ...coverageBaseline.aggregate,
+        "packages/core/src/workflow-observation.ts": {
+          statements: 100,
+          branches: 100,
+          functions: 100,
+          lines: 100
+        },
+        "packages/core/src/workflow-diagnostics.ts": {
+          statements: 100,
+          branches: 100,
+          functions: 100,
+          lines: 100
+        },
+        "packages/adapter-shared/src/workflow-reads.ts": {
+          statements: 100,
+          branches: 100,
+          functions: 100,
+          lines: 100
+        },
         "extensions/radius/skills/radius-app-bicep/scripts/show-radius-type.mjs":
+          {
+            statements: 100,
+            branches: 100,
+            functions: 100,
+            lines: 100
+          },
+        "extensions/radius/skills/radius-app-bicep/scripts/bicep-security-rules.mjs":
           {
             statements: 100,
             branches: 100,
