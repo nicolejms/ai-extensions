@@ -1,9 +1,13 @@
 {
   "name": "@radius-project/core",
   "version": "0.1.0",
+  "private": true,
   "license": "Apache-2.0",
   "description": "UI-agnostic core for the Radius Canvas product: repo modeling, application graph build/diff, compute-platform abstraction, and workflow generation. No SDK / HTTP / DOM dependencies.",
   "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
   "main": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",

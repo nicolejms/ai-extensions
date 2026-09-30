@@ -350,11 +350,7 @@ svg.react-flow__connectionline {
     text-decoration: none;
     color: #999;
   }
-@keyframes radius-graph-dashdraw {
-  from {
-    stroke-dashoffset: 10;
-  }
-}
+
 .react-flow__edgelabel-renderer {
   position: absolute;
   width: 100%;
@@ -650,4 +646,9 @@ svg.react-flow__connectionline {
 .react-flow__edge-text {
   fill: var(--xy-edge-label-color, var(--xy-edge-label-color-default));
 }
+}
+@keyframes radius-graph-dashdraw {
+  from {
+    stroke-dashoffset: 10;
+  }
 }

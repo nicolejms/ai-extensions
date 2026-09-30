@@ -50,7 +50,7 @@ describe("live UCP graph normalization", () => {
     });
   });
   it.each(["Radius.Compute", "Radius.Networking"])(
-    "normalizes %s Outbound as target -> owner without mutating source meaning",
+    "normalizes %s Outbound as owner -> target without mutating source meaning",
     (namespace) => {
       const resource = {
         ...web,
@@ -61,20 +61,20 @@ describe("live UCP graph normalization", () => {
       const input = { resources: [resource, db] };
       const original = structuredClone(input);
       const result = normalizeLiveGraph(input, context);
-      expect(result.resources[1].connections).toEqual([
-        { id: resource.id, direction: "Outbound" }
+      expect(result.resources[0].connections).toEqual([
+        { id: db.id, direction: "Outbound" }
       ]);
-      expect(result.resources[0].connections).toEqual([]);
+      expect(result.resources[1].connections).toEqual([]);
       expect(input).toEqual(original);
       expect(normalizeLiveGraph(input, context)).toEqual(result);
     }
   );
-  it("normalizes Inbound as owner -> target and deduplicates reciprocal edges", () => {
+  it("normalizes Inbound as target -> owner and deduplicates reciprocal edges", () => {
     const result = normalizeLiveGraph(
       {
         resources: [
-          { ...web, connections: [{ id: db.id, direction: "Inbound" }] },
-          { ...db, connections: [{ id: web.id, direction: "Outbound" }] }
+          { ...web, connections: [{ id: db.id, direction: "Outbound" }] },
+          { ...db, connections: [{ id: web.id, direction: "Inbound" }] }
         ]
       },
       context
@@ -83,6 +83,33 @@ describe("live UCP graph normalization", () => {
       { id: db.id, direction: "Outbound" }
     ]);
     expect(result.resources[1].connections).toEqual([]);
+  });
+  it("keeps every target of a source in connection order", () => {
+    const cache = {
+      id: id("Radius.Data/caches", "cache"),
+      name: "cache",
+      type: "Radius.Data/caches"
+    };
+    const result = normalizeLiveGraph(
+      {
+        resources: [
+          {
+            ...web,
+            connections: [
+              { id: db.id, direction: "Outbound" },
+              { id: cache.id, direction: "Outbound" }
+            ]
+          },
+          db,
+          cache
+        ]
+      },
+      context
+    );
+    expect(result.resources[0].connections).toEqual([
+      { id: db.id, direction: "Outbound" },
+      { id: cache.id, direction: "Outbound" }
+    ]);
   });
   it("applies no type-specific direction correction to gateways", () => {
     const gateway = {
@@ -99,10 +126,10 @@ describe("live UCP graph normalization", () => {
       },
       context
     );
-    expect(result.resources[0].connections).toEqual([
-      { id: gateway.id, direction: "Outbound" }
+    expect(result.resources[0].connections).toEqual([]);
+    expect(result.resources[1].connections).toEqual([
+      { id: web.id, direction: "Outbound" }
     ]);
-    expect(result.resources[1].connections).toEqual([]);
   });
   it("reports malformed, missing, and GU-06 self-connections without dropping valid resources", () => {
     const result = normalizeLiveGraph(
@@ -113,9 +140,9 @@ describe("live UCP graph normalization", () => {
             connections: [
               null,
               { id: 1 },
-              { id: "invalid" },
-              { id: db.id },
-              { id: web.id }
+              { id: "invalid", direction: "Outbound" },
+              { id: db.id, direction: "Outbound" },
+              { id: web.id, direction: "Inbound" }
             ]
           }
         ]
@@ -181,6 +208,10 @@ describe("live UCP graph normalization", () => {
         { ...web, connections: [{ id: db.id, direction: "wrong" }] },
         db
       ]
+    },
+    { resources: [{ ...web, connections: [{ id: db.id }] }] },
+    {
+      resources: [{ ...web, connections: [{ id: web.id, direction: "wrong" }] }]
     }
   ])("fails explicitly for malformed payload %#", (input) => {
     expect(() => normalizeLiveGraph(input, context)).toThrow(TypeError);
@@ -208,6 +239,19 @@ describe("live UCP graph normalization", () => {
     expect(
       normalizeLiveGraph({ resources: [nested] }, context).resources[0].id
     ).toBe(nested.id);
+  });
+  it("matches the selected plane case-insensitively", () => {
+    const upper = {
+      ...context,
+      applicationId: context.applicationId.replace(
+        "/planes/radius/local/",
+        "/planes/Radius/Local/"
+      )
+    };
+    expect(() => graphContextKey(upper)).not.toThrow();
+    expect(
+      normalizeLiveGraph({ resources: [web] }, upper).resources
+    ).toHaveLength(1);
   });
   it("keys an application ID regardless of type casing", () => {
     const lower = {

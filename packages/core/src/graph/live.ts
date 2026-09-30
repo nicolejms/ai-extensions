@@ -23,6 +23,11 @@ function optionalText(value: unknown, field: string): string | undefined {
   return value;
 }
 
+// UCP resource IDs, including plane segments, are case-insensitive.
+function sameUcpSegment(left: string, right: string): boolean {
+  return left.toLowerCase() === right.toLowerCase();
+}
+
 function isRadiusType(type: string): boolean {
   return type.toLowerCase().startsWith("radius.");
 }
@@ -36,8 +41,8 @@ export function graphContextKey(context: GraphContext): string {
     !application ||
     application.segments.length !== 1 ||
     application.type.toLowerCase() !== "radius.core/applications" ||
-    application.plane.type !== context.plane.type ||
-    application.plane.name !== context.plane.name
+    !sameUcpSegment(application.plane.type, context.plane.type) ||
+    !sameUcpSegment(application.plane.name, context.plane.name)
   ) {
     throw new TypeError(
       "Live graph applicationId must be a Radius.Core/applications resource on the selected plane."
@@ -52,7 +57,9 @@ export function graphContextKey(context: GraphContext): string {
 }
 
 /**
- * Normalize UCP's dependency direction to source -> target renderer edges.
+ * Normalize UCP connections to source -> target renderer edges. An `Outbound`
+ * connection names its destination, so `Outbound` on A to B and `Inbound` on B
+ * from A both become the edge A -> B, matching the modeled graph path.
  * Direction is read from the payload alone: no resource type is special-cased,
  * so only the `Radius.*` types the control plane serves are supported. No
  * modeled hashes, Canvas visualization filter, or workflow status projection.
@@ -123,6 +130,11 @@ export function normalizeLiveGraph(
         warnings.push(`Invalid connection ignored on ${owner}`);
         continue;
       }
+      if (entry.direction !== "Inbound" && entry.direction !== "Outbound") {
+        throw new TypeError(
+          `Invalid live graph connection direction on ${owner}`
+        );
+      }
       if (
         !parseResourceId(entry.id) ||
         !ids.has(entry.id) ||
@@ -133,14 +145,9 @@ export function normalizeLiveGraph(
         );
         continue;
       }
-      if (entry.direction !== "Inbound" && entry.direction !== "Outbound") {
-        throw new TypeError(
-          `Invalid live graph connection direction on ${owner}`
-        );
-      }
       const inbound = entry.direction === "Inbound";
-      const source = inbound ? owner : entry.id;
-      const target = inbound ? entry.id : owner;
+      const source = inbound ? entry.id : owner;
+      const target = inbound ? owner : entry.id;
       edges.set(JSON.stringify([source, target]), { source, target });
     }
   }

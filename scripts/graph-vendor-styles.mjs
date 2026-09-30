@@ -35,8 +35,32 @@ export function renameKeyframes(css, from, to) {
   return css.replaceAll(from, to);
 }
 
+// `@scope` accepts only style rules and conditional group rules, so a browser
+// drops a keyframes declaration nested inside it. The prefixed declarations are
+// moved after the scope, where they stay global without restyling the host.
+export function hoistKeyframes(css) {
+  const keyframes = [];
+  let rules = "";
+  let index = 0;
+  for (const match of css.matchAll(/@(?:-webkit-)?keyframes\b[^{]*\{/g)) {
+    let end = match.index + match[0].length;
+    for (let depth = 1; depth > 0; end++) {
+      assert.ok(end < css.length, "Unterminated keyframes declaration");
+      if (css[end] === "{") depth++;
+      else if (css[end] === "}") depth--;
+    }
+    rules += css.slice(index, match.index);
+    keyframes.push(css.slice(match.index, end));
+    index = end;
+  }
+  return { rules: rules + css.slice(index), keyframes };
+}
+
 export function scopeFlowStyles(css, license) {
   assert.doesNotMatch(css, /@(?:import|font-face)\b/);
+  const { rules, keyframes } = hoistKeyframes(
+    renameKeyframes(css.trim(), "dashdraw", "radius-graph-dashdraw")
+  );
   return `/*!
 Generated from @xyflow/react@12.11.6 by scripts/graph-vendor-styles.mjs.
 Do not edit: regenerate after reviewing a vendor update.
@@ -44,8 +68,9 @@ Do not edit: regenerate after reviewing a vendor update.
 ${license.trim()}
 */
 @scope (.radius-graph) {
-${renameKeyframes(css.trim(), "dashdraw", "radius-graph-dashdraw")}
+${rules.trim()}
 }
+${keyframes.join("\n")}
 `;
 }
 

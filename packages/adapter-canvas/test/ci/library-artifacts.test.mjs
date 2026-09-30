@@ -10,6 +10,7 @@ import {
 } from "../../../../scripts/library-artifacts.mjs";
 import {
   expectedScopedFlowStyles,
+  hoistKeyframes,
   renameKeyframes,
   scopeFlowStyles,
   scopedFlowStylesPath
@@ -19,6 +20,7 @@ function manifest() {
   return {
     name: "@radius-project/graph-react",
     version: "0.1.0",
+    private: true,
     license: "Apache-2.0",
     type: "module",
     typesVersions: {
@@ -66,8 +68,27 @@ describe("packed library contracts", () => {
     expect(css).toContain("MIT License");
     expect(css).toContain("Copyright (c) 2019-2025 webkid GmbH");
     expect(css).toContain("@scope (.radius-graph)");
-    expect(css).toContain("@keyframes radius-graph-dashdraw");
+    expect(css).toMatch(/\n\}\n@keyframes radius-graph-dashdraw \{[^@]*\}\n$/);
     expect(css).not.toMatch(/@(?:-webkit-)?keyframes dashdraw/);
+  });
+
+  it("moves every keyframes declaration outside the graph scope", () => {
+    expect(
+      hoistKeyframes(
+        ".a{color:red}@keyframes one{from{top:0}to{top:1px}}.b{}" +
+          "@-webkit-keyframes two{from{top:0}}"
+      )
+    ).toEqual({
+      rules: ".a{color:red}.b{}",
+      keyframes: [
+        "@keyframes one{from{top:0}to{top:1px}}",
+        "@-webkit-keyframes two{from{top:0}}"
+      ]
+    });
+    expect(hoistKeyframes(".a{}")).toEqual({ rules: ".a{}", keyframes: [] });
+    expect(() => hoistKeyframes("@keyframes one{from{top:0}")).toThrow(
+      "Unterminated keyframes declaration"
+    );
   });
 
   it("renames every prefixed vendor keyframe declaration and reference", () => {
@@ -258,6 +279,7 @@ describe("packed library contracts", () => {
   it("accepts only the browser-safe graph and domain subpaths of core", () => {
     const core = {
       name: "@radius-project/core",
+      private: true,
       type: "module",
       license: "Apache-2.0",
       typesVersions: {
@@ -374,9 +396,9 @@ describe("packed library contracts", () => {
       }
     ],
     [
-      "private package",
+      "publishable package",
       (value) => {
-        value.private = true;
+        delete value.private;
       }
     ],
     [

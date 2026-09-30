@@ -142,7 +142,7 @@ Backstage (and Headlamp) use MUI with a global `CssBaseline` and their own theme
 - The library has no MUI or emotion/JSS dependency, injects no global selectors, and does not require a `ThemeProvider`; hosts map their theme into tokens instead.
 - Custom appearance is per instance, so a Backstage plugin can use its own skin even if another graph on the page uses the default.
 
-Residual risks are inbound rather than outbound. This is not Shadow DOM isolation, so host resets (for example `CssBaseline` typography or `box-sizing`) can still inherit into the graph; `base.css` resets `box-sizing` and the geometry it depends on. `@scope` requires Chromium/Edge 118+, Safari 17.4+, or Firefox 146+, and older browsers render the graph unstyled. The Backstage plugin must run the same host qualification as Headlamp: load order before and after host CSS, unchanged computed styles on sampled host elements, and a missing-stylesheet negative control.
+Residual risks are inbound rather than outbound. This is not Shadow DOM isolation, so host resets (for example `CssBaseline` typography or `box-sizing`) can still inherit into the graph; `base.css` resets `box-sizing` and the geometry it depends on. `@scope` requires Chromium/Edge 118+, Safari 17.4+, or Firefox 146+, and older browsers render the graph unstyled. Radius Canvas appends an unscoped copy of the scoped rules to its bundle for older macOS WebKit; other hosts must meet those browser requirements. The Backstage plugin must run the same host qualification as Headlamp: load order before and after host CSS, unchanged computed styles on sampled host elements, and a missing-stylesheet negative control.
 
 #### Canvas adapter - packages/adapter-canvas
 

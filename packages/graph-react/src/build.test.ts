@@ -6,6 +6,7 @@
 // is a pure function of the resource list, so it is asserted directly here.
 
 import { describe, it, expect } from "vitest";
+import { normalizeLiveGraph } from "@radius-project/core/graph";
 import {
   buildGraph,
   isLocalSourceNode,
@@ -411,6 +412,45 @@ describe("modeled graph", () => {
       { id: "b", name: "b" }
     ]);
     expect(built.edges.map((edge) => edge.id)).toEqual(['["a","b"]']);
+  });
+
+  it("draws live and modeled connections in the same direction", () => {
+    const prefix =
+      "/planes/radius/local/resourceGroups/demo/providers/Radius.Core/";
+    const webId = prefix + "containers/web";
+    const dbId = prefix + "databases/db";
+    const payload = [
+      {
+        id: webId,
+        name: "web",
+        type: "Radius.Core/containers",
+        connections: [{ id: dbId, direction: "Outbound" }]
+      },
+      {
+        id: dbId,
+        name: "db",
+        type: "Radius.Core/databases",
+        connections: [{ id: webId, direction: "Inbound" }]
+      }
+    ];
+    const live = normalizeLiveGraph(
+      { resources: payload },
+      {
+        connectionId: "parity",
+        plane: { type: "radius", name: "local" },
+        applicationId: prefix + "applications/demo"
+      }
+    );
+    const liveResources: GraphResource[] = live.resources.map((resource) => ({
+      ...resource,
+      connections: [...resource.connections]
+    }));
+    const edges = (resources: GraphResource[], liveMode: boolean) =>
+      buildGraph(settings({ liveMode }), resources).edges.map(
+        ({ source, target }) => [source, target]
+      );
+    expect(edges(liveResources, true)).toEqual([[webId, dbId]]);
+    expect(edges(payload, false)).toEqual(edges(liveResources, true));
   });
 
   it("names a connection by name when it carries no id", () => {

@@ -289,6 +289,47 @@ async function gotoCanvas(
   await page.waitForLoadState("domcontentloaded");
 }
 
+// Simulates a WebView older than Safari 17.4, which drops every @scope block.
+function withoutScopedRules(html: string): string {
+  let unscoped = "";
+  let index = 0;
+  for (const match of html.matchAll(/@scope\b[^{]*\{/g)) {
+    if (match.index < index) continue;
+    let end = match.index + match[0].length;
+    for (let depth = 1; depth > 0; end++) {
+      if (end >= html.length) throw new Error("Unterminated @scope block");
+      if (html[end] === "{") depth++;
+      else if (html[end] === "}") depth--;
+    }
+    unscoped += html.slice(index, match.index);
+    index = end;
+  }
+  return unscoped + html.slice(index);
+}
+
+const GRAPH_STYLE_SAMPLE = `(() => {
+  const properties = [
+    "display", "position", "z-index", "box-sizing", "width", "color",
+    "background-color", "border-top-style", "border-top-width",
+    "border-top-color", "border-top-left-radius", "padding-top", "font-size",
+    "font-weight", "white-space", "stroke", "stroke-width", "cursor"
+  ];
+  const selectors = [
+    ".radius-graph", ".react-flow", ".react-flow__renderer",
+    ".react-flow__pane", ".react-flow__node", ".rad-node",
+    ".rad-node__title", ".rad-node__type", ".react-flow__edge-path",
+    ".react-flow__controls-button"
+  ];
+  return Object.fromEntries(selectors.map((selector) => {
+    const element = document.querySelector(selector);
+    if (!element) return [selector, null];
+    const style = getComputedStyle(element);
+    return [selector, Object.fromEntries(
+      properties.map((name) => [name, style.getPropertyValue(name)])
+    )];
+  }));
+})()`;
+
 async function expectNoWcagViolations(page: Page): Promise<void> {
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
@@ -903,6 +944,39 @@ test.describe("Radius Canvas in Chromium", () => {
     await expect(page.locator("[data-radius-details]")).toContainText(
       "Microsoft.DBforPostgreSQL/flexibleServers"
     );
+  });
+
+  test("styles the graph identically in a WebView without @scope support", async ({
+    page,
+    canvas
+  }) => {
+    const sampleGraphStyles = async (): Promise<unknown> => {
+      await expect(page.locator(".rad-node")).toHaveCount(3);
+      await expect(page.locator(".react-flow__edge-path")).not.toHaveCount(0);
+      return page.evaluate(GRAPH_STYLE_SAMPLE);
+    };
+    await gotoCanvas(page, canvas, "graph");
+    const scoped = await sampleGraphStyles();
+
+    let served = "";
+    await page.route(/\/\?page=graph$/, async (route) => {
+      const response = await route.fetch();
+      served = withoutScopedRules(await response.text());
+      await route.fulfill({ response, body: served });
+    });
+    await page.reload();
+    await page.waitForLoadState("domcontentloaded");
+    const unscoped = await sampleGraphStyles();
+
+    expect(served).not.toContain("@scope");
+    expect(served).toContain(":where(.radius-graph) .react-flow");
+    expect(unscoped).toEqual(scoped);
+    // Scoped React Flow and theme rules still apply without @scope.
+    expect(unscoped).toMatchObject({
+      ".react-flow__renderer": { "z-index": "4" },
+      ".rad-node": { "border-top-style": "solid", cursor: "pointer" },
+      ".rad-node__title": { "font-weight": "600", "white-space": "nowrap" }
+    });
   });
 
   test("keeps the document canvas dark while navigating between top-level panes", async ({

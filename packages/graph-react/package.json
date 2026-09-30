@@ -1,6 +1,7 @@
 {
   "name": "@radius-project/graph-react",
   "version": "0.1.0",
+  "private": true,
   "description": "Browser-safe Radius graph visualization for React applications.",
   "license": "Apache-2.0",
   "type": "module",

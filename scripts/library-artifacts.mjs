@@ -29,7 +29,8 @@ const legacyTypeExports = {
 
 export function validateLibraryManifest(manifest, name, coreVersion) {
   assert.equal(manifest.name, name);
-  assert.notEqual(manifest.private, true, `${name} must be publishable`);
+  // Guards against an accidental publish until a publish workflow exists.
+  assert.equal(manifest.private, true, `${name} must stay private`);
   assert.equal(manifest.license, "Apache-2.0");
   assert.equal(manifest.type, "module");
   assert.doesNotMatch(JSON.stringify(manifest), /(?:workspace|catalog):/);
