@@ -835,7 +835,9 @@ test.describe("Radius Canvas visual baselines", () => {
             .locator("[data-radius-details]")
             .getByText(outcome.expectedMessage, { exact: true })
         ).toBeVisible();
-        await expect(page.locator("[data-radius-details]")).not.toContainText("creating");
+        await expect(page.locator("[data-radius-details]")).not.toContainText(
+          "creating"
+        );
         await expect(
           successfulNode.getByAltText("Deployed", { exact: true })
         ).toBeInViewport();

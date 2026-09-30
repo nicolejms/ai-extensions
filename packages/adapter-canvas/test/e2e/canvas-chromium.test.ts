@@ -863,7 +863,7 @@ test.describe("Radius Canvas in Chromium", () => {
     await details.focus();
     await page.keyboard.press("Enter");
 
-    const panel = page.locator("#node-popup");
+    const panel = page.locator("[data-radius-details]");
     await expect(panel).toContainText("Concrete type");
     await expect(panel).toContainText(
       "Microsoft.ContainerService/managedClusters@2024-01-01"
@@ -900,7 +900,7 @@ test.describe("Radius Canvas in Chromium", () => {
       "Microsoft.DBforPostgreSQL/flexibleServers"
     );
     await postgres.getByRole("button", { name: "Show details" }).click();
-    await expect(page.locator("#node-popup")).toContainText(
+    await expect(page.locator("[data-radius-details]")).toContainText(
       "Microsoft.DBforPostgreSQL/flexibleServers"
     );
   });
@@ -1123,7 +1123,7 @@ test.describe("Radius Canvas in Chromium", () => {
     await page.selectOption("#graph-branch", WORKTREE_BRANCH);
     await expect(page.locator(".rad-node")).toHaveCount(3);
 
-    const panel = page.locator("#node-popup");
+    const panel = page.locator("[data-radius-details]");
     await expect(panel).toBeHidden();
 
     const title = page
@@ -3771,11 +3771,11 @@ test.describe("Radius Canvas in Chromium", () => {
       .getByRole("button", { name: "Show details" });
     await details.focus();
     await page.keyboard.press("Enter");
-    await expect(page.locator("#node-popup")).toContainText(
+    await expect(page.locator("[data-radius-details]")).toContainText(
       DEPLOY_MONITOR_TIMED_OUT_MESSAGE
     );
     const detailsAccessibility = await new AxeBuilder({ page })
-      .include("#node-popup")
+      .include("[data-radius-details]")
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
       .analyze();
     expect(detailsAccessibility.violations).toEqual([]);
