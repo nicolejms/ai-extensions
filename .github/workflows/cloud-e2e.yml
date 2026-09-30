@@ -34,6 +34,11 @@ on:
     # do not contend. Runs share one precreated AKS cluster and remain serialized.
     - cron: "23 4 * * *"
   workflow_dispatch:
+    inputs:
+      radius-build-manifest:
+        description: Optional immutable Radius build publication manifest used only by the Cloud E2E fixture workflows.
+        required: false
+        type: string
 
 permissions: {}
 
@@ -226,6 +231,7 @@ jobs:
           CLOUD_E2E_BOT_CLIENT_ID: ${{ secrets.CLOUD_E2E_BOT_CLIENT_ID }}
           CLOUD_E2E_BOT_INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
           CLOUD_E2E_BOT_PRIVATE_KEY: ${{ secrets.CLOUD_E2E_BOT_PRIVATE_KEY }}
+          AIEXT_CLOUD_E2E_RADIUS_BUILD_MANIFEST: ${{ inputs.radius-build-manifest }}
         run: pnpm run test:cloud
 
       - name: Create a fresh read-only GitHub App token for diagnostics

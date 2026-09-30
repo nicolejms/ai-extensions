@@ -113,6 +113,7 @@ import {
   requireWorkflowRunId,
   requireSingleApplication
 } from "./support/deploy-journey.js";
+import { installCloudRadiusBuildOverride } from "./support/cloud-radius-build-override.js";
 import {
   describeUnprovisionedFixtureRepository,
   isFixtureRepositoryProvisioned,
@@ -127,6 +128,8 @@ const subscriptionId = process.env.AZURE_SUBSCRIPTION_ID?.trim() ?? "";
 const githubToken = process.env.GH_TOKEN?.trim() ?? "";
 const githubPackagesToken = process.env.GH_PACKAGES_TOKEN?.trim() ?? "";
 const githubPackagesUser = process.env.GH_PACKAGES_USER?.trim() ?? "";
+const radiusBuildManifestUrl =
+  process.env.AIEXT_CLOUD_E2E_RADIUS_BUILD_MANIFEST?.trim() ?? "";
 const githubAppTokenConfig = readPlaywrightGitHubAppTokenConfig();
 
 const DELETE_TIMEOUT_MS = 5 * 60 * 1000;
@@ -627,6 +630,13 @@ test.describe("Radius Canvas manages an environment's lifecycle against real clo
           defaultBranch: cloud.defaultBranch
         })
       ).toBe("committed");
+      if (radiusBuildManifestUrl)
+        await installCloudRadiusBuildOverride({
+          manifestUrl: radiusBuildManifestUrl,
+          workspacePath: cloud.workspacePath,
+          defaultBranch: cloud.defaultBranch,
+          commands: ports.commands
+        });
     } catch (error) {
       primaryError = error;
       throw error;

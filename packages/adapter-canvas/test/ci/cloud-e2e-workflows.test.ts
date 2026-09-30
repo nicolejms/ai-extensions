@@ -61,7 +61,16 @@ interface WorkflowJob {
 }
 
 interface Workflow {
-  readonly on?: Record<string, unknown>;
+  readonly on?: Record<string, unknown> & {
+    readonly workflow_dispatch?: {
+      readonly inputs?: Record<
+        string,
+        {
+          readonly required?: boolean;
+        }
+      >;
+    };
+  };
   readonly permissions?: Record<string, string>;
   readonly concurrency?: {
     group?: string;
@@ -224,8 +233,14 @@ describe("cloud-e2e.yml", () => {
     expect(run?.env).toMatchObject({
       GH_TOKEN: "${{ steps.app-token.outputs.token }}",
       CLOUD_E2E_BOT_CLIENT_ID: "${{ secrets.CLOUD_E2E_BOT_CLIENT_ID }}",
-      CLOUD_E2E_BOT_PRIVATE_KEY: "${{ secrets.CLOUD_E2E_BOT_PRIVATE_KEY }}"
+      CLOUD_E2E_BOT_PRIVATE_KEY: "${{ secrets.CLOUD_E2E_BOT_PRIVATE_KEY }}",
+      AIEXT_CLOUD_E2E_RADIUS_BUILD_MANIFEST:
+        "${{ inputs.radius-build-manifest }}"
     });
+    expect(
+      workflow.on?.workflow_dispatch?.inputs?.["radius-build-manifest"]
+        ?.required
+    ).toBe(false);
   });
 
   it("isolates package credentials while using OIDC and an installation token", async () => {
