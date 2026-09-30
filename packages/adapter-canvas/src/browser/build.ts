@@ -352,33 +352,10 @@ function browserEntrySource(spec: BrowserEntrySpec): string {
   if (spec.name !== "graph") {
     return `${installer}\ninstall(globalThis);\n`;
   }
-  return `import * as react from "react";
-import { createRoot } from "react-dom/client";
-import ReactFlow, {
-  Background,
-  Controls,
-  Handle,
-  Position,
-  useEdgesState,
-  useNodesState
-} from "reactflow";
-import dagre from "dagre";
-import "reactflow/dist/style.css";
+  return `import { mountRadiusGraph } from "@radius-project/graph-react";
+import "@radius-project/graph-react/styles.css";
 ${installer}
-install(globalThis, {
-  react,
-  reactDom: { createRoot },
-  reactFlow: {
-    default: ReactFlow,
-    Background,
-    Controls,
-    Handle,
-    Position,
-    useEdgesState,
-    useNodesState
-  },
-  dagre
-});
+install(globalThis, mountRadiusGraph);
 `;
 }
 
