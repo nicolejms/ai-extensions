@@ -307,7 +307,7 @@ function GraphContent({
           className: "radius-graph__warning",
           "data-radius-part": "warning"
         },
-        graph.warnings.join(" ")
+        graph.warnings.map((warning) => warning.message).join(" ")
       )
     : null,
     h(
@@ -380,19 +380,32 @@ function GraphContent({
 }
 
 class GraphBoundary extends Component<
-  { children?: ReactNode; onRetry?: () => void; identity: RadiusGraphData },
-  { failed: boolean }
+  {
+    children?: ReactNode;
+    onRetry?: () => void;
+    onError?: (error: unknown) => void;
+    identity: RadiusGraphData;
+  },
+  { failed: boolean; identity: RadiusGraphData }
 > {
-  state = { failed: false };
+  state = { failed: false, identity: this.props.identity };
+
+  /** A new graph identity clears a failure before its first render. */
+  static getDerivedStateFromProps(
+    props: Readonly<{ identity: RadiusGraphData }>,
+    state: Readonly<{ identity: RadiusGraphData }>
+  ): { failed: boolean; identity: RadiusGraphData } | null {
+    return props.identity === state.identity ?
+        null
+      : { failed: false, identity: props.identity };
+  }
 
   static getDerivedStateFromError(): { failed: boolean } {
     return { failed: true };
   }
 
-  componentDidUpdate(previous: Readonly<{ identity: RadiusGraphData }>): void {
-    if (this.state.failed && previous.identity !== this.props.identity) {
-      this.setState({ failed: false });
-    }
+  componentDidCatch(error: unknown): void {
+    this.props.onError?.(error);
   }
 
   render(): ReactNode {
@@ -433,7 +446,11 @@ export function RadiusGraph(props: RadiusGraphProps): ReactElement {
     },
     h(
       GraphBoundary,
-      { identity: props.graph, onRetry: props.callbacks?.onRetry },
+      {
+        identity: props.graph,
+        onRetry: props.callbacks?.onRetry,
+        onError: props.callbacks?.onError
+      },
       h(GraphContent, props)
     )
   );

@@ -11,4 +11,9 @@ export interface GraphCallbacks {
   onDetails?(node: GraphNodeData, open: boolean): void;
   onNavigate?(node: GraphNodeData): void;
   onRetry?(): void;
+  /**
+   * Called once when rendering fails and the graph shows its error state, so
+   * the host can log or report the failure. Errors thrown here propagate.
+   */
+  onError?(error: unknown): void;
 }

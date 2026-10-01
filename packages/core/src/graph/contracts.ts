@@ -51,11 +51,31 @@ export interface LiveGraphResource {
   }[];
 }
 
+/** Stable reason a live resource or connection was dropped during normalization. */
+export type LiveGraphWarningCode =
+  | "duplicate-resource"
+  | "invalid-resource-id"
+  | "invalid-connection"
+  | "unresolved-connection";
+
+/**
+ * A recoverable live-graph problem. Hosts can filter or localize by `code`
+ * and `severity` instead of parsing `message`, which is English display text.
+ */
+export interface LiveGraphWarning {
+  readonly code: LiveGraphWarningCode;
+  /** `info` for benign input noise; `warning` when data was dropped. */
+  readonly severity: "info" | "warning";
+  readonly message: string;
+  /** The resource that owns the dropped record. */
+  readonly resourceId: string;
+}
+
 export interface LiveGraph {
   readonly kind: "live";
   readonly context: GraphContext;
   readonly resources: readonly LiveGraphResource[];
-  readonly warnings: readonly string[];
+  readonly warnings: readonly LiveGraphWarning[];
 }
 
 export interface ModeledGraph {

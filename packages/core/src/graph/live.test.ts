@@ -151,15 +151,33 @@ describe("live UCP graph normalization", () => {
     );
     expect(result.resources).toHaveLength(1);
     expect(result.resources[0].connections).toEqual([]);
-    expect(result.warnings).toHaveLength(5);
-    expect(result.warnings.every((warning) => warning.includes(web.id))).toBe(
-      true
-    );
+    expect(result.warnings.map((warning) => warning.code)).toEqual([
+      "invalid-connection",
+      "invalid-connection",
+      "unresolved-connection",
+      "unresolved-connection",
+      "unresolved-connection"
+    ]);
+    expect(
+      result.warnings.every(
+        (warning) =>
+          warning.resourceId === web.id &&
+          warning.severity === "warning" &&
+          warning.message.includes(web.id)
+      )
+    ).toBe(true);
   });
   it("deduplicates identical records but rejects conflicting duplicates", () => {
     expect(
       normalizeLiveGraph({ resources: [web, { ...web }] }, context).warnings
-    ).toEqual([`Duplicate resource ignored: ${web.id}`]);
+    ).toEqual([
+      {
+        code: "duplicate-resource",
+        severity: "info",
+        resourceId: web.id,
+        message: `Duplicate resource ignored: ${web.id}`
+      }
+    ]);
     expect(() =>
       normalizeLiveGraph(
         { resources: [web, { ...web, name: "other" }] },
@@ -196,10 +214,8 @@ describe("live UCP graph normalization", () => {
     {},
     { resources: null },
     { resources: [null] },
-    { resources: [{ ...web, id: "bad" }] },
     { resources: [{ ...web, name: "" }] },
     { resources: [{ ...web, type: 4 }] },
-    { resources: [{ ...web, type: "Applications.Core/containers" }] },
     { resources: [{ ...web, connections: {} }] },
     { resources: [{ ...web, provider: 1 }] },
     { resources: [{ ...web, provisioningState: false }] },
@@ -222,6 +238,11 @@ describe("live UCP graph normalization", () => {
     { ...context, applicationId: web.id },
     {
       ...context,
+      applicationId:
+        "/subscriptions/0000/resourceGroups/test/providers/Radius.Core/applications/application"
+    },
+    {
+      ...context,
       applicationId: context.applicationId + "/Radius.Core/applications/nested"
     },
     { ...context, connectionId: "" },
@@ -229,6 +250,77 @@ describe("live UCP graph normalization", () => {
     { ...context, plane: { type: "radius", name: "other" } }
   ])("rejects invalid or mismatched context %#", (input) => {
     expect(() => graphContextKey(input)).toThrow(TypeError);
+  });
+  it("renders Azure, AWS and other non-Radius resources as generic resources", () => {
+    const azure = {
+      id: "/subscriptions/0000/resourceGroups/rg/providers/Microsoft.Cache/redis/cache",
+      name: "cache",
+      type: "Microsoft.Cache/redis"
+    };
+    const aws = {
+      id: "/planes/aws/aws/accounts/1234/regions/us-west-2/providers/AWS.Kinesis/Stream/events",
+      name: "events",
+      type: "AWS.Kinesis/Stream"
+    };
+    const legacy = {
+      id: id("Applications.Core/containers", "legacy"),
+      name: "legacy",
+      type: "Applications.Core/containers"
+    };
+    const result = normalizeLiveGraph(
+      {
+        resources: [
+          {
+            ...web,
+            connections: [
+              { id: azure.id, direction: "Outbound" },
+              { id: aws.id, direction: "Outbound" }
+            ]
+          },
+          azure,
+          aws,
+          legacy
+        ]
+      },
+      context
+    );
+    expect(result.resources.map((resource) => resource.type)).toEqual([
+      web.type,
+      azure.type,
+      aws.type,
+      legacy.type
+    ]);
+    expect(result.resources[0].connections).toEqual([
+      { id: azure.id, direction: "Outbound" },
+      { id: aws.id, direction: "Outbound" }
+    ]);
+    expect(result.warnings).toEqual([]);
+  });
+  it("drops only a resource whose ID cannot be parsed and reports it", () => {
+    const result = normalizeLiveGraph(
+      {
+        resources: [
+          { ...web, connections: [{ id: "bad", direction: "Outbound" }] },
+          { ...db, id: "bad" }
+        ]
+      },
+      context
+    );
+    expect(result.resources.map((resource) => resource.id)).toEqual([web.id]);
+    expect(result.warnings).toEqual([
+      {
+        code: "invalid-resource-id",
+        severity: "warning",
+        resourceId: "bad",
+        message: "Resource with an unrecognized ID ignored: bad"
+      },
+      {
+        code: "unresolved-connection",
+        severity: "warning",
+        resourceId: web.id,
+        message: `Unresolved or self connection ignored: ${web.id} -> bad`
+      }
+    ]);
   });
   it("judges support by the declared type, not the ID's provider", () => {
     const nested = {

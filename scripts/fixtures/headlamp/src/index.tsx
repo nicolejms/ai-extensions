@@ -5,14 +5,13 @@ import { RadiusGraph } from "@radius-project/graph-react";
 import type { GraphStyle } from "@radius-project/graph-react";
 import { normalizeLiveGraph } from "@radius-project/core/graph";
 import { parseResourceId } from "@radius-project/core/domain";
-import { resolveGraphSettings } from "@radius-project/graph-react/presentation";
 import "@radius-project/graph-react/styles.css";
 import { Away, HeadlampFrame } from "./peer";
 
 const prefix =
   "/planes/radius/local/resourceGroups/demo/providers/Radius.Core/";
 const applicationId = prefix + "applications/headlamp";
-if (!parseResourceId(applicationId) || !resolveGraphSettings().enablePopup) {
+if (!parseResourceId(applicationId)) {
   throw new Error("Packed graph helper exports are unavailable.");
 }
 const graph = normalizeLiveGraph(

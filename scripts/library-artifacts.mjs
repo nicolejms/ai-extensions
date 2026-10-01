@@ -8,7 +8,6 @@ const publicExports = {
   },
   "@radius-project/graph-react": {
     ".": "./dist/index",
-    "./presentation": "./dist/presentation",
     "./brand": "./dist/brand",
     "./base.css": "./dist/base.css",
     "./styles.css": "./dist/styles.css",
@@ -22,7 +21,6 @@ const legacyTypeExports = {
     domain: ["dist/domain/index.d.ts"]
   },
   "@radius-project/graph-react": {
-    presentation: ["dist/presentation.d.ts"],
     brand: ["dist/brand.d.ts"]
   }
 };

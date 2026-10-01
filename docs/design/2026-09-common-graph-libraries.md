@@ -10,7 +10,7 @@ Radius clients should present the same resources and relationships consistently.
 
 Introduce common graph contracts and React components owned by `ai-extensions`. Clients reuse one normalization and rendering pipeline, supplying only their data, theme, and host-specific actions. This reduces code duplication and makes a graph improvement available to every consumer through a versioned library update. Consistency means shared visual language and interaction rules, not pretending that live inventory and modeled topology contain the same information.
 
-Potential consumers include the Copilot Canvas extension, Aspire, and the Radius Dashboard, whether running as a standalone application or as a plugin in an existing Backstage installation. Both dashboard modes could use the same graph libraries while retaining their host's navigation, authentication, and page composition. An Aspire integration could consume the common contracts and mount the shared React graph through a host adapter, subject to the same compatibility and client-journey qualification.
+Potential consumers include the Copilot Canvas extension, a Headlamp plugin, Aspire, and the Radius Dashboard, whether running as a standalone application or as a plugin in an existing Backstage installation. Both dashboard modes could use the same graph libraries while retaining their host's navigation, authentication, and page composition. A Headlamp plugin mounts the shared React graph inside Headlamp's MUI shell; Headlamp is also the first real-host qualification target. An Aspire integration could consume the common contracts and mount the shared React graph through a host adapter, subject to the same compatibility and client-journey qualification.
 
 ## Terms and definitions
 
@@ -112,15 +112,15 @@ Choose Option 1 with a hybrid split between rendering and styling. The common li
 
 ### API design (if applicable)
 
-The public surface provides `RadiusGraph`, `RadiusGraphProps`, `GraphCallbacks`, and `mountRadiusGraph`. `RadiusGraph` accepts `graph`, presentation options, theme, and optional selection/details/navigation/external/source/retry callbacks. The mount helper wraps the same React component for server-rendered shells; it is not another renderer.
+The public surface provides `RadiusGraph`, `RadiusGraphProps`, `GraphCallbacks`, and `mountRadiusGraph`. `RadiusGraph` accepts `graph`, presentation options, theme, and optional selection/details/navigation/external/source/retry/error callbacks. `onError` reports a render failure to the host once, when the graph shows its error state. The `presentation` subpath (graph building, layout and details helpers) is workspace-only for the Canvas adapter and is not part of the packed exports. The mount helper wraps the same React component for server-rendered shells; it is not another renderer.
 
-Core contracts distinguish `live`, `modeled`, `planned`, `deployed-projection`, and `diff`. Live normalization requires full IDs and explicit connection/plane/application context, retains raw provisioning status, and does not require diff hashes. Canvas filtering, output expansion, diff provenance, and workflow status remain non-live capabilities. `@radius-project/core/domain` and `/graph` are deliberate browser-safe entry points; the core root is not this public browser contract.
+Core contracts distinguish `live`, `modeled`, `planned`, `deployed-projection`, and `diff`. Live normalization requires full IDs and explicit connection/plane/application context, retains raw provisioning status, and does not require diff hashes. It accepts any resource type, so Azure, AWS and other non-`Radius.*` resources render as generic cards. Its warnings are objects with a stable `code`, a `severity` (`info` or `warning`), the owning `resourceId` and an English `message`, so hosts can filter or localize without parsing text. Canvas filtering, output expansion, diff provenance, and workflow status remain non-live capabilities. `@radius-project/core/domain` and `/graph` are deliberate browser-safe entry points; the core root is not this public browser contract.
 
 ### Implementation details
 
 #### Core package - packages/core
 
-Own resource-ID parsing, graph variants, and deterministic, non-mutating live normalization. Coalesce identical duplicates with diagnostics; reject conflicting duplicates. Report omitted malformed, dangling, and self-referential connections. Keep legacy gateway direction correction opt-in and source-specific.
+Own resource-ID parsing, graph variants, and deterministic, non-mutating live normalization. The parser follows the Radius control plane's ID forms: UCP IDs (`/planes/<type>/<name>` plus scope pairs such as `resourceGroups` or AWS `accounts`/`regions`) and Azure Resource Manager IDs (`/subscriptions/...`). A resource whose ID cannot be parsed is dropped with a warning instead of failing the whole graph. Coalesce identical duplicates with diagnostics; reject conflicting duplicates. Report omitted malformed, dangling, and self-referential connections. Keep legacy gateway direction correction opt-in and source-specific.
 
 #### Common React package - packages/graph-react
 
@@ -134,7 +134,7 @@ Hosts customize styling at three levels, from least to most effort:
 
 1. Pass `theme` values (background, text, muted, accent, font, color scheme), for example derived from the host's MUI `useTheme()`.
 2. Keep `styles.css` and override public `--radius-graph-*` CSS custom properties on the graph root.
-3. Import only `base.css`, set `appearance="custom"`, and style the documented `data-radius-part` hooks and supported vendor hooks from a host stylesheet.
+3. Import only `base.css`, set `appearance="custom"`, and style the documented `data-radius-part` hooks and supported vendor hooks from a host stylesheet. The vendor hooks are React Flow class names; graph-react pins React Flow exactly, and a React Flow upgrade that removes or renames a supported hook ships as a graph-react major release.
 
 Backstage (and Headlamp) use MUI with a global `CssBaseline` and their own theme. The library is designed not to conflict with them:
 
@@ -158,19 +158,27 @@ Keep the Copilot distribution separate. Bundle the shared graph into the existin
 
 #### Build & packaging
 
-Build core before graph-react; emit JavaScript, declarations, and CSS. Canvas uses workspace dependencies; external hosts install versioned npm artifacts and import `@radius-project/graph-react/styles.css`. React/ReactDOM remain peers, not bundled copies. Keep library Changesets/release selection separate from Copilot plugin discovery. Release compatible library versions together and record each client's resolved versions so a regression can be rolled back to a known-compatible set.
+Build core before graph-react; emit JavaScript, declarations, and CSS. Canvas uses workspace dependencies; external hosts install versioned npm artifacts and import `@radius-project/graph-react/styles.css`. React/ReactDOM remain peers, not bundled copies. Keep library Changesets/release selection separate from Copilot plugin discovery. When publishing begins, publish only from CI through npm trusted publishing (OIDC), never with a long-lived token; every published version carries npm provenance and has an SBOM attached to its release. Release compatible library versions together and record each client's resolved versions so a regression can be rolled back to a known-compatible set.
 
 ### Error handling
 
-Hosts display fetch/authentication failures and own retry policy. Libraries reject invalid essential input, expose normalization warnings, and render explicit empty/degraded-layout states instead of success-shaped fallbacks. Callback failures must not be silently swallowed.
+Hosts display fetch/authentication failures and own retry policy. Libraries reject invalid essential input, expose structured normalization warnings, report render failures through `onError`, and render explicit empty/degraded-layout states instead of success-shaped fallbacks. Callback failures must not be silently swallowed.
 
 ## Test plan
 
-Require pure identity/normalization/layout tests, real-browser details/focus/lifecycle tests, client host-boundary tests, and exact packed JS/declarations/CSS consumption with matching React peers. Canonical visual checks use unchanged snapshots and thresholds, two repetitions, and no retries.
+Use the repository's test layers: unit, browser component, critical journey, visual, and real-host.
+
+- **Unit** tests, collocated as `*.test.ts`, cover identity parsing, live normalization, graph building, and layout.
+- **Browser component** tests (`*.browser.test.ts`, the `graph-react-component` Vitest project) cover details, focus, lifecycle, and host styling in real Chromium.
+- **Critical journey** tests cover Canvas graph pages through their host boundary.
+- **Visual** checks use the canonical Canvas snapshots and thresholds, two repetitions, and no retries.
+- **Real-host** qualification is described below.
+
+Every pull request also runs the packed-artifact check (`pnpm run test:integration:libraries`), which consumes the exact packed JavaScript, declarations, and CSS with matching React 18 and React 19 peers.
 
 Establish real-renderer behavior and visual baselines before migrating each client. Exercise equivalent fixtures across hosts to verify shared card/edge semantics, control dimensions, legend meanings, and keyboard behavior while allowing intentional theme and container differences. Include multiple instances, live graphs without modeled metadata, status-only updates, source actions, and teardown.
 
-Common-library changes must install exact candidate packages into pinned supported client revisions and run client-owned journeys. Verify transitive core resolution and stylesheet loading; deliberately missing CSS must fail the check. Do not mock the renderer or fall back to the old implementation. Run untrusted candidate code without secrets. Passing isolated library tests is necessary but insufficient to claim client compatibility.
+**Real-host** qualification installs exact candidate packages into pinned supported client revisions, currently Headlamp, and runs client-owned journeys. It needs external images and registries, so it runs on a schedule and on demand rather than on every library pull request; a passing run against the release candidate is required before any library release. Pull requests run the offline packaging, boundary, and host-styling checks that protect the same behavior. Verify transitive core resolution and stylesheet loading; deliberately missing CSS must fail the check. Do not mock the renderer or fall back to the old implementation. Run untrusted candidate code without secrets. Passing isolated library tests is necessary but insufficient to claim client compatibility.
 
 ## Security
 
@@ -191,11 +199,12 @@ Expose graph diagnostics to the host; add no telemetry service. Preserve canonic
 3. Preserve visual/interaction fidelity and qualify exact packed artifacts on both React majors.
 4. Establish each additional client's baseline and candidate-package CI, migrate its adapter, and remove its duplicate renderer before declaring that integration complete.
 
-Release acceptance requires both shared-library checks and supported-client journeys. Retaining an independent renderer after migration does not satisfy the consolidation goal.
+Release acceptance requires the pull-request library checks plus a passing real-host qualification run against the exact release candidate. Retaining an independent renderer after migration does not satisfy the consolidation goal.
 
 ## Open questions
 
-- Who owns public npm publishing, supported consumer pins, and cross-repository CI?
+- Who owns the npm publishing workflow, supported consumer pins, and cross-repository CI?
+- Should the graph contracts ship as a separate package, such as `@radius-project/graph-core`, instead of the `@radius-project/core/graph` and `/domain` subpaths? Decide in the publishing change, before the first public release.
 - Which client/compiler/React patch combinations must qualify, including demand for React 18.2?
 - Which existing graph-package consumers need forwarding exports or a deprecation period?
 

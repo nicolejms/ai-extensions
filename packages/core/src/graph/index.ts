@@ -24,6 +24,8 @@ export type {
   GraphResource,
   LiveGraph,
   LiveGraphResource,
+  LiveGraphWarning,
+  LiveGraphWarningCode,
   ModeledGraph,
   RadiusGraphData,
   ResourceConnection,

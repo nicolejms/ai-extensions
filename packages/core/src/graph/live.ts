@@ -2,7 +2,9 @@ import { parseResourceId } from "../domain/resource-id.js";
 import type {
   GraphContext,
   LiveGraph,
-  LiveGraphResource
+  LiveGraphResource,
+  LiveGraphWarning,
+  LiveGraphWarningCode
 } from "./contracts.js";
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -28,8 +30,17 @@ function sameUcpSegment(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
 }
 
-function isRadiusType(type: string): boolean {
-  return type.toLowerCase().startsWith("radius.");
+function warning(
+  code: LiveGraphWarningCode,
+  resourceId: string,
+  message: string
+): LiveGraphWarning {
+  return {
+    code,
+    severity: code === "duplicate-resource" ? "info" : "warning",
+    message,
+    resourceId
+  };
 }
 
 /** Identity for host-owned caches; same-named applications never share context. */
@@ -38,7 +49,7 @@ export function graphContextKey(context: GraphContext): string {
     text(context.applicationId, "applicationId")
   );
   if (
-    !application ||
+    !application?.plane ||
     application.segments.length !== 1 ||
     application.type.toLowerCase() !== "radius.core/applications" ||
     !sameUcpSegment(application.plane.type, context.plane.type) ||
@@ -60,9 +71,10 @@ export function graphContextKey(context: GraphContext): string {
  * Normalize UCP connections to source -> target renderer edges. An `Outbound`
  * connection names its destination, so `Outbound` on A to B and `Inbound` on B
  * from A both become the edge A -> B, matching the modeled graph path.
- * Direction is read from the payload alone: no resource type is special-cased,
- * so only the `Radius.*` types the control plane serves are supported. No
- * modeled hashes, Canvas visualization filter, or workflow status projection.
+ * Direction is read from the payload alone: no resource type is special-cased.
+ * Any resource type is accepted, so Azure, AWS and other non-`Radius.*`
+ * resources render as generic cards. No modeled hashes, Canvas visualization
+ * filter, or workflow status projection.
  */
 export function normalizeLiveGraph(
   value: unknown,
@@ -76,13 +88,11 @@ export function normalizeLiveGraph(
   const connections = new Map<string, unknown[]>();
   const ids = new Set<string>();
   const signatures = new Map<string, string>();
-  const warnings: string[] = [];
+  const warnings: LiveGraphWarning[] = [];
   for (const raw of value.resources) {
     if (!record(raw))
       throw new TypeError("Live graph resource must be an object.");
     const id = text(raw.id, "resource id");
-    const identity = parseResourceId(id);
-    if (!identity) throw new TypeError(`Invalid live graph resource id: ${id}`);
     if (raw.connections !== undefined && !Array.isArray(raw.connections)) {
       throw new TypeError(`Live graph connections must be an array: ${id}`);
     }
@@ -97,12 +107,17 @@ export function normalizeLiveGraph(
       ),
       connections: []
     };
-    // Only Radius.* types are supported. Check the declared type, not the ID's
-    // provider: a nested resource ID can name a different provider.
-    if (!isRadiusType(resource.type)) {
-      throw new TypeError(
-        `Unsupported live graph resource type ${resource.type}: ${id}`
+    // One unreadable ID must not blank the whole graph: drop that resource
+    // only. Its connections then resolve to nothing and are reported too.
+    if (!parseResourceId(id)) {
+      warnings.push(
+        warning(
+          "invalid-resource-id",
+          id,
+          `Resource with an unrecognized ID ignored: ${id}`
+        )
       );
+      continue;
     }
     const entries = Array.isArray(raw.connections) ? raw.connections : [];
     const signature = JSON.stringify([
@@ -115,7 +130,9 @@ export function normalizeLiveGraph(
       if (signatures.get(id) !== signature) {
         throw new TypeError(`Conflicting live graph resource records: ${id}`);
       }
-      warnings.push(`Duplicate resource ignored: ${id}`);
+      warnings.push(
+        warning("duplicate-resource", id, `Duplicate resource ignored: ${id}`)
+      );
       continue;
     }
     ids.add(id);
@@ -127,7 +144,13 @@ export function normalizeLiveGraph(
   for (const [owner, entries] of connections) {
     for (const entry of entries) {
       if (!record(entry) || typeof entry.id !== "string") {
-        warnings.push(`Invalid connection ignored on ${owner}`);
+        warnings.push(
+          warning(
+            "invalid-connection",
+            owner,
+            `Invalid connection ignored on ${owner}`
+          )
+        );
         continue;
       }
       if (entry.direction !== "Inbound" && entry.direction !== "Outbound") {
@@ -141,7 +164,11 @@ export function normalizeLiveGraph(
         entry.id === owner
       ) {
         warnings.push(
-          `Unresolved or self connection ignored: ${owner} -> ${entry.id}`
+          warning(
+            "unresolved-connection",
+            owner,
+            `Unresolved or self connection ignored: ${owner} -> ${entry.id}`
+          )
         );
         continue;
       }

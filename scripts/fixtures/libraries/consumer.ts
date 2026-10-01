@@ -1,10 +1,7 @@
 import { createElement } from "react";
 import { RadiusGraph, mountRadiusGraph } from "@radius-project/graph-react";
 import type { GraphStyle, RadiusGraphProps } from "@radius-project/graph-react";
-import {
-  buildGraph,
-  resolveGraphSettings
-} from "@radius-project/graph-react/presentation";
+
 import {
   RADIUS_BRAND_MARK,
   radiusBrandMarkSvg
@@ -41,14 +38,12 @@ const custom = createElement(RadiusGraph, {
   style
 });
 const themed = createElement(RadiusGraph, { graph, appearance: "default" });
-const built = buildGraph(resolveGraphSettings(), []);
 const mark: RadiusBrandMark = RADIUS_BRAND_MARK;
 void [
   identity,
   element,
   custom,
   themed,
-  built,
   mark,
   radiusBrandMarkSvg({ size: 26, title: "Radius" }),
   graphContextKey(context),
@@ -58,6 +53,8 @@ void [
 // The narrow npm package must not expose the internal Node-facing root.
 // @ts-expect-error Internal core APIs are intentionally not public exports.
 import "@radius-project/core/modeling";
+// @ts-expect-error Presentation helpers are workspace-only, not a packed export.
+import "@radius-project/graph-react/presentation";
 
 // The published mark is a readonly contract, so one host cannot mutate the
 // shared definition out from under another.

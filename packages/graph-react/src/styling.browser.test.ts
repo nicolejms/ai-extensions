@@ -276,11 +276,24 @@ describe("host stylesheet ownership", () => {
         kind: "live",
         context,
         resources: [],
-        warnings: ["Some connections were omitted."]
+        warnings: [
+          {
+            code: "unresolved-connection",
+            severity: "warning",
+            resourceId: context.applicationId,
+            message: "Some connections were omitted."
+          },
+          {
+            code: "duplicate-resource",
+            severity: "info",
+            resourceId: context.applicationId,
+            message: "A duplicate was ignored."
+          }
+        ]
       }
     });
     const warning = await within(mounted.host).findByText(
-      "Some connections were omitted."
+      "Some connections were omitted. A duplicate was ignored."
     );
     expect(getComputedStyle(warning).color).toBe("rgb(115, 81, 13)");
     const consoleError = vi
@@ -308,7 +321,9 @@ describe("host stylesheet ownership", () => {
       });
       expect(retry.dataset.radiusPart).toBe("retry");
       await userEvent.click(retry);
-      await within(mounted.host).findByText("Some connections were omitted.");
+      await within(mounted.host).findByText(
+        "Some connections were omitted. A duplicate was ignored."
+      );
       expect(within(mounted.host).queryByRole("alert")).toBeNull();
     } finally {
       consoleError.mockRestore();

@@ -31,4 +31,3 @@ root.render(createElement(RadiusGraph, { graph }));
 export { RadiusGraph, mountRadiusGraph } from "@radius-project/graph-react";
 export { normalizeLiveGraph } from "@radius-project/core/graph";
 export { parseResourceId } from "@radius-project/core/domain";
-export { buildGraph } from "@radius-project/graph-react/presentation";

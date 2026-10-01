@@ -25,7 +25,6 @@ function manifest() {
     type: "module",
     typesVersions: {
       "*": {
-        presentation: ["dist/presentation.d.ts"],
         brand: ["dist/brand.d.ts"]
       }
     },
@@ -35,11 +34,7 @@ function manifest() {
         import: "./dist/index.js",
         default: "./dist/index.js"
       },
-      "./presentation": {
-        types: "./dist/presentation.d.ts",
-        import: "./dist/presentation.js",
-        default: "./dist/presentation.js"
-      },
+
       "./brand": {
         types: "./dist/brand.d.ts",
         import: "./dist/brand.js",
@@ -332,7 +327,7 @@ describe("packed library contracts", () => {
     [
       "source-only classic TypeScript declarations",
       (value) => {
-        value.typesVersions["*"].presentation = ["src/presentation.ts"];
+        value.typesVersions["*"].brand = ["src/brand.ts"];
       }
     ],
     [
@@ -381,6 +376,16 @@ describe("packed library contracts", () => {
       "source base stylesheet",
       (value) => {
         value.exports["./base.css"] = "./src/base.css";
+      }
+    ],
+    [
+      "public workspace-only presentation helpers",
+      (value) => {
+        value.exports["./presentation"] = {
+          types: "./dist/presentation.d.ts",
+          import: "./dist/presentation.js",
+          default: "./dist/presentation.js"
+        };
       }
     ],
     [
@@ -495,7 +500,7 @@ describe("packed library contracts", () => {
         {
           inputs: { "src/index.ts": {} },
           outputs: {
-            "dist/presentation.js": { imports: [] },
+            "dist/brand.js": { imports: [] },
             "dist/index.js": { imports: [{ path, external: true }] }
           }
         },

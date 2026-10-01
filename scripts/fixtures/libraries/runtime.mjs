@@ -3,10 +3,7 @@ import { createRequire } from "node:module";
 import { createElement, version } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { RadiusGraph, mountRadiusGraph } from "@radius-project/graph-react";
-import {
-  buildGraph,
-  resolveGraphSettings
-} from "@radius-project/graph-react/presentation";
+
 import {
   RADIUS_BRAND_MARK,
   radiusBrandMarkSvg
@@ -30,7 +27,6 @@ assert.deepEqual(graph.resources, []);
 assert.equal(parseResourceId(context.applicationId).name, "demo");
 assert.equal(typeof graphContextKey(context), "string");
 assert.throws(() => normalizeLiveGraph({}, context), /resources/);
-assert.deepEqual(buildGraph(resolveGraphSettings(), []).nodes, []);
 assert.equal(typeof mountRadiusGraph, "function");
 // The brand mark ships without the renderer so a host can register it as a
 // navigation icon: geometry for an icon registry, markup for inline use.
@@ -54,6 +50,7 @@ for (const hidden of [
   "@radius-project/core",
   "@radius-project/core/modeling",
   "@radius-project/core/src/graph/index.ts",
+  "@radius-project/graph-react/presentation",
   "@radius-project/graph-react/theme.css",
   "@radius-project/graph-react/src/index.ts"
 ]) {

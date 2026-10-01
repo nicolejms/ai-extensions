@@ -162,8 +162,16 @@ describe("public host-neutral React API", () => {
       resources: [],
       warnings: []
     };
-    root.render(h(RadiusGraph, { graph: failed }));
+    const errors: unknown[] = [];
+    root.render(
+      h(RadiusGraph, {
+        graph: failed,
+        callbacks: { onError: (error) => errors.push(error) }
+      })
+    );
     expect(await within(element).findByRole("alert")).toBeTruthy();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(TypeError);
     expect(
       within(element).queryByRole("button", { name: "Reload graph" })
     ).toBeNull();
