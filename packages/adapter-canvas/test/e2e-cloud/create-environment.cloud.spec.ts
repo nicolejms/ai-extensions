@@ -65,6 +65,7 @@ import {
   classifyWorkflowPublication,
   cloudCanvasState,
   describeWorkflowPublication,
+  environmentVariablesApiPath,
   evaluateCreateEnvironmentGate,
   expectedFederatedCredentialSubjects,
   findEnvironmentIdentityProblems,
@@ -563,7 +564,9 @@ test.describe("Radius Canvas manages an environment's lifecycle against real clo
           ports.commands,
           [
             "api",
-            `repos/${cloud.repository}/environments/${cloud.environmentName}/variables`
+            "--paginate",
+            "--slurp",
+            environmentVariablesApiPath(cloud.repository, cloud.environmentName)
           ],
           "gh api the environment's variables"
         )
@@ -1021,7 +1024,9 @@ test.describe("Radius Canvas manages an environment's lifecycle against real clo
           ports.commands,
           [
             "api",
-            `repos/${cloud.repository}/environments/${cloud.environmentName}/variables`
+            "--paginate",
+            "--slurp",
+            environmentVariablesApiPath(cloud.repository, cloud.environmentName)
           ],
           "gh api the surviving environment's variables"
         )
